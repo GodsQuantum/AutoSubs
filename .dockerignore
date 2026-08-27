@@ -1,0 +1,13 @@
+.git
+.github
+.gitignore
+.env*
+target
+frontend/node_modules
+frontend/.svelte-kit
+frontend/build
+data
+output
+watch
+archives
+*.log

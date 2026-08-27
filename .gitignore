@@ -1,0 +1,13 @@
+/target/
+/data/
+/output/
+/watch/
+/archives/
+.env
+.env.*
+!.env.example
+/frontend/node_modules/
+/frontend/.svelte-kit/
+/frontend/build/
+.DS_Store
+*.log

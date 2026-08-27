@@ -1,194 +1,234 @@
-use crate::subtitle::types::{SubtitleLine, SubtitleWord};
+use crate::domain::{SubtitleLine, SubtitleWord};
+use serde::{Deserialize, Serialize};
+use unicode_segmentation::UnicodeSegmentation;
 
-const MIN_LINE_DURATION: f64 = 0.08; // 80ms
-const GAP: f64 = 0.010;             // 10ms
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NormalizeOptions {
+    pub min_line_duration: f64,
+    pub gap: f64,
+    pub min_word_duration: f64,
+}
 
-/// Cascading overlap-prevention engine.
-/// Sort → enforce min duration → enforce gap between consecutive lines (cascade forward).
-/// Also normalises word-level timestamps within each line.
-pub fn normalize_and_fix_overlaps(lines: &[SubtitleLine]) -> Vec<SubtitleLine> {
-    if lines.is_empty() {
-        return vec![];
+impl Default for NormalizeOptions {
+    fn default() -> Self {
+        Self { min_line_duration: 0.080, gap: 0.010, min_word_duration: 0.020 }
     }
+}
 
-    let mut sorted: Vec<SubtitleLine> = lines
-        .iter()
-        .filter(|l| !l.text.trim().is_empty())
-        .enumerate()
-        .map(|(_i, l)| SubtitleLine {
-            id: l.id,
-            start: l.start.max(0.0),
-            end: l.end.max(0.0),
-            text: l.text.trim().to_string(),
-            words: l.words.clone(),
-        })
-        .collect();
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NormalizationReport {
+    pub lines: Vec<SubtitleLine>,
+    pub repaired_line_overlaps: usize,
+    pub retimed_word_lines: usize,
+    pub dropped_empty_lines: usize,
+}
 
-    sorted.sort_by(|a, b| {
-        a.start
-            .partial_cmp(&b.start)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.end.partial_cmp(&b.end).unwrap_or(std::cmp::Ordering::Equal))
-    });
+pub fn normalize_subtitles(lines: &[SubtitleLine], options: NormalizeOptions) -> NormalizationReport {
+    let min_line = options.min_line_duration.max(0.001);
+    let gap = options.gap.max(0.0);
+    let mut dropped = 0usize;
 
-    if sorted.is_empty() {
-        return vec![];
-    }
+    let mut out: Vec<SubtitleLine> = lines.iter().filter_map(|line| {
+        let text = line.text.trim().to_string();
+        if text.is_empty() { dropped += 1; return None; }
+        let start = finite_non_negative(line.start);
+        let mut end = finite_non_negative(line.end);
+        if end < start + min_line { end = start + min_line; }
+        Some(SubtitleLine { id: line.id, start, end, text, words: line.words.clone() })
+    }).collect();
 
-    // Pass 1: enforce minimum duration
-    for line in sorted.iter_mut() {
-        if line.end < line.start + MIN_LINE_DURATION {
-            line.end = line.start + MIN_LINE_DURATION;
-        }
-    }
+    out.sort_by(|a, b| a.start.total_cmp(&b.start).then(a.end.total_cmp(&b.end)));
 
-    // Pass 2: enforce inter-line gap (cascade forward)
-    for i in 0..sorted.len() - 1 {
-        let current_end = sorted[i].end;
-        let next_start   = sorted[i + 1].start;
-        if current_end > next_start - GAP {
-            let target_end = next_start - GAP;
-            if target_end >= sorted[i].start + MIN_LINE_DURATION {
-                sorted[i].end = target_end;
+    let mut repaired = 0usize;
+    if out.len() > 1 {
+        for i in 0..out.len() - 1 {
+            if out[i].end + gap <= out[i + 1].start { continue; }
+            repaired += 1;
+
+            let left_min_end = out[i].start + min_line;
+            let right_max_start = out[i + 1].end - min_line;
+
+            if left_min_end + gap <= right_max_start {
+                let desired_seam = (out[i].end + out[i + 1].start) / 2.0;
+                let seam_min = left_min_end + gap / 2.0;
+                let seam_max = right_max_start - gap / 2.0;
+                let seam = desired_seam.clamp(seam_min, seam_max);
+                out[i].end = seam - gap / 2.0;
+                out[i + 1].start = seam + gap / 2.0;
             } else {
-                sorted[i].end = sorted[i].start + MIN_LINE_DURATION;
-                sorted[i + 1].start = sorted[i].end + GAP;
-                if sorted[i + 1].end < sorted[i + 1].start + MIN_LINE_DURATION {
-                    sorted[i + 1].end = sorted[i + 1].start + MIN_LINE_DURATION;
+                out[i].end = left_min_end;
+                out[i + 1].start = out[i].end + gap;
+                if out[i + 1].end < out[i + 1].start + min_line {
+                    out[i + 1].end = out[i + 1].start + min_line;
                 }
             }
         }
     }
 
-    // Pass 3: normalize word timestamps per line
-    sorted
-        .into_iter()
-        .enumerate()
-        .map(|(idx, mut line)| {
-            line.id = idx as u32;
-            let words = normalize_line_words(&line);
-            line.words = Some(words);
-            line
-        })
-        .collect()
+    let mut retimed_word_lines = 0usize;
+    for (idx, line) in out.iter_mut().enumerate() {
+        line.id = idx as u32;
+        let (words, retimed) = normalize_words(line, options.min_word_duration);
+        if retimed { retimed_word_lines += 1; }
+        line.words = Some(words);
+    }
+
+    NormalizationReport {
+        lines: out,
+        repaired_line_overlaps: repaired,
+        retimed_word_lines,
+        dropped_empty_lines: dropped,
+    }
 }
 
-/// Rescales word-level timestamps to strictly lie within [line.start, line.end].
-/// If word data is missing or corrupt, distributes proportionally by character count.
-pub fn normalize_line_words(line: &SubtitleLine) -> Vec<SubtitleWord> {
-    let line_start = line.start.max(0.0);
-    let line_end = (line.end).max(line_start + 0.05);
-    let total_dur = line_end - line_start;
+fn finite_non_negative(value: f64) -> f64 {
+    if value.is_finite() { value.max(0.0) } else { 0.0 }
+}
 
-    let raw_tokens: Vec<&str> = line
-        .text
-        .split_whitespace()
-        .filter(|t| !t.is_empty())
-        .collect();
+fn normalize_words(line: &SubtitleLine, configured_min_word: f64) -> (Vec<SubtitleWord>, bool) {
+    let tokens: Vec<&str> = line.text.split_whitespace().collect();
+    if tokens.is_empty() { return (Vec::new(), false); }
 
-    if raw_tokens.is_empty() {
-        return vec![];
-    }
+    let duration = (line.end - line.start).max(0.001);
+    let n = tokens.len();
+    let fit_min = (duration / (n as f64 * 1.25)).max(0.001);
+    let min_word = configured_min_word.max(0.001).min(fit_min);
 
     if let Some(existing) = &line.words {
-        if existing.len() == raw_tokens.len() && !existing.is_empty() {
-            let first_start = existing[0].start;
-            let last_end = existing[existing.len() - 1].end;
-            let existing_span = last_end - first_start;
+        if existing.len() == n && existing.iter().all(|word| word.start.is_finite() && word.end.is_finite()) {
+            let mut result = Vec::with_capacity(n);
+            let mut previous_end = line.start;
+            let mut changed = false;
 
-            let needs_rescale = existing_span <= 0.0
-                || first_start < line_start - 0.5
-                || last_end > line_end + 0.5
-                || (existing_span - total_dur).abs() > 1.0;
-
-            if !needs_rescale {
-                // Clamp each word into the line window
-                let mut fixed: Vec<SubtitleWord> = Vec::with_capacity(raw_tokens.len());
-                let mut current_start = line_start;
-                for (i, token) in raw_tokens.iter().enumerate() {
-                    let orig_start = current_start.max(existing[i].start);
-                    let orig_end = if i == raw_tokens.len() - 1 {
-                        line_end.max(orig_start + 0.04)
-                    } else {
-                        existing[i].end.max(orig_start + 0.04)
-                    };
-                    fixed.push(SubtitleWord {
-                        word: token.to_string(),
-                        start: orig_start,
-                        end: orig_end,
-                    });
-                    current_start = orig_end;
+            for (i, (token, old)) in tokens.iter().zip(existing.iter()).enumerate() {
+                let remaining = n - i - 1;
+                let latest_start = (line.end - min_word * (remaining as f64 + 1.0)).max(previous_end);
+                let desired_start = if i == 0 { line.start } else { old.start };
+                let start = desired_start.clamp(previous_end, latest_start);
+                let latest_end = (line.end - min_word * remaining as f64).max(start + min_word);
+                let end = if i == n - 1 {
+                    line.end
+                } else {
+                    old.end.clamp(start + min_word, latest_end)
+                };
+                if (start - old.start).abs() > 1e-6 || (end - old.end).abs() > 1e-6 || old.word != *token {
+                    changed = true;
                 }
-                return fixed;
+                result.push(SubtitleWord { word: (*token).to_string(), start, end });
+                previous_end = end;
             }
+            return (result, changed);
         }
     }
 
-    // Proportional distribution by character count
-    distribute_by_chars(&raw_tokens, line_start, line_end, total_dur)
-}
+    let weights: Vec<usize> = tokens.iter().map(|token| token.graphemes(true).count().max(1)).collect();
+    let total_weight: usize = weights.iter().sum();
+    let mut result = Vec::with_capacity(n);
+    let mut cursor = line.start;
 
-fn distribute_by_chars(
-    tokens: &[&str],
-    line_start: f64,
-    line_end: f64,
-    total_dur: f64,
-) -> Vec<SubtitleWord> {
-    let total_chars: usize = tokens.iter().map(|t| t.len().max(1)).sum();
-    let mut offset = 0.0;
-    let n = tokens.len();
-
-    tokens
-        .iter()
-        .enumerate()
-        .map(|(i, token)| {
-            let char_frac = token.len().max(1) as f64 / total_chars as f64;
-            let word_dur = (char_frac * total_dur).max(0.03);
-            let w_start = line_start + offset;
-            let w_end = if i == n - 1 {
-                line_end
-            } else {
-                (w_start + word_dur).min(line_end - 0.02)
-            };
-            offset += word_dur;
-            SubtitleWord {
-                word: token.to_string(),
-                start: w_start,
-                end: (w_start + 0.02).max(w_end),
-            }
-        })
-        .collect()
+    for (i, (token, weight)) in tokens.iter().zip(weights.iter()).enumerate() {
+        let remaining = n - i - 1;
+        let proportional = duration * (*weight as f64 / total_weight as f64);
+        let target = proportional.max(min_word);
+        let latest_end = line.end - min_word * remaining as f64;
+        let end = if i == n - 1 { line.end } else { (cursor + target).min(latest_end) };
+        result.push(SubtitleWord { word: (*token).to_string(), start: cursor, end: end.max(cursor + min_word).min(line.end) });
+        cursor = result.last().map(|w| w.end).unwrap_or(cursor);
+    }
+    (result, true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn make_line(id: u32, start: f64, end: f64, text: &str) -> SubtitleLine {
+    fn line(id: u32, start: f64, end: f64, text: &str) -> SubtitleLine {
         SubtitleLine { id, start, end, text: text.into(), words: None }
     }
 
-    #[test]
-    fn no_overlap_after_fix() {
-        let lines = vec![
-            make_line(0, 0.0, 1.5, "hello"),
-            make_line(1, 1.0, 2.5, "world"), // overlaps with first
-        ];
-        let fixed = normalize_and_fix_overlaps(&lines);
-        assert_eq!(fixed.len(), 2);
-        assert!(fixed[0].end + GAP <= fixed[1].start + 1e-9,
-            "gap violated: {} > {}", fixed[0].end, fixed[1].start);
+    fn assert_invariants(lines: &[SubtitleLine], options: NormalizeOptions) {
+        for (i, line) in lines.iter().enumerate() {
+            assert!(line.start.is_finite() && line.end.is_finite());
+            assert!(line.start >= 0.0);
+            assert!(line.end - line.start + 1e-9 >= options.min_line_duration);
+            if let Some(words) = &line.words {
+                let mut previous = line.start;
+                for word in words {
+                    assert!(word.start + 1e-9 >= line.start);
+                    assert!(word.start + 1e-9 >= previous);
+                    assert!(word.end > word.start);
+                    assert!(word.end <= line.end + 1e-9, "word {:?} escaped line {:?}", word, line);
+                    previous = word.end;
+                }
+            }
+            if let Some(next) = lines.get(i + 1) {
+                assert!(line.end + options.gap <= next.start + 1e-9,
+                    "overlap: {}..{} then {}..{}", line.start, line.end, next.start, next.end);
+            }
+        }
     }
 
     #[test]
-    fn min_duration_enforced() {
-        let lines = vec![make_line(0, 0.0, 0.01, "tiny")];
-        let fixed = normalize_and_fix_overlaps(&lines);
-        assert!(fixed[0].end - fixed[0].start >= MIN_LINE_DURATION);
+    fn repairs_overlap_by_sharing_the_seam() {
+        let options = NormalizeOptions::default();
+        let result = normalize_subtitles(&[
+            line(0, 0.0, 2.0, "première ligne"),
+            line(1, 1.5, 3.0, "deuxième ligne"),
+        ], options);
+        assert_eq!(result.repaired_line_overlaps, 1);
+        assert!(result.lines[0].end < 2.0);
+        assert!(result.lines[1].start > 1.5);
+        assert_invariants(&result.lines, options);
     }
 
     #[test]
-    fn empty_input() {
-        assert!(normalize_and_fix_overlaps(&[]).is_empty());
+    fn word_end_never_escapes_parent_after_edit() {
+        let options = NormalizeOptions::default();
+        let mut edited = line(0, 1.0, 1.8, "bonjour le monde");
+        edited.words = Some(vec![
+            SubtitleWord { word: "bonjour".into(), start: 0.8, end: 1.4 },
+            SubtitleWord { word: "le".into(), start: 1.35, end: 2.1 },
+            SubtitleWord { word: "monde".into(), start: 2.0, end: 2.4 },
+        ]);
+        let result = normalize_subtitles(&[edited], options);
+        assert_invariants(&result.lines, options);
+        assert_eq!(result.lines[0].words.as_ref().unwrap().last().unwrap().end, 1.8);
+    }
+
+    #[test]
+    fn token_count_change_retimes_words_inside_line() {
+        let options = NormalizeOptions::default();
+        let mut edited = line(0, 0.0, 1.0, "un texte beaucoup plus long");
+        edited.words = Some(vec![
+            SubtitleWord { word: "un".into(), start: 0.0, end: 0.5 },
+            SubtitleWord { word: "texte".into(), start: 0.5, end: 1.0 },
+        ]);
+        let result = normalize_subtitles(&[edited], options);
+        assert_eq!(result.retimed_word_lines, 1);
+        assert_eq!(result.lines[0].words.as_ref().unwrap().len(), 5);
+        assert_invariants(&result.lines, options);
+    }
+
+    #[test]
+    fn invalid_and_negative_timestamps_are_sanitized() {
+        let options = NormalizeOptions::default();
+        let result = normalize_subtitles(&[
+            line(0, f64::NAN, f64::INFINITY, "hello"),
+            line(1, -2.0, -1.0, "world"),
+        ], options);
+        assert_invariants(&result.lines, options);
+    }
+
+    #[test]
+    fn cascading_tiny_windows_remain_non_overlapping() {
+        let options = NormalizeOptions::default();
+        let result = normalize_subtitles(&[
+            line(0, 0.0, 0.02, "a"),
+            line(1, 0.01, 0.03, "b"),
+            line(2, 0.02, 0.04, "c"),
+        ], options);
+        assert_invariants(&result.lines, options);
     }
 }

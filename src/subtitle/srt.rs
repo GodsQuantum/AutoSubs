@@ -1,139 +1,171 @@
-use crate::subtitle::normalize::normalize_and_fix_overlaps;
-use crate::subtitle::types::SubtitleLine;
-use std::collections::HashSet;
+use crate::domain::{SubtitleLine, SubtitleWord};
+use crate::subtitle::normalize::{normalize_subtitles, NormalizeOptions};
+use regex::Regex;
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
-// ─── SRT time helpers ─────────────────────────────────────────────────────────
+static SRT_TIMECODE_RE: OnceLock<Regex> = OnceLock::new();
+fn timecode_re() -> &'static Regex {
+    SRT_TIMECODE_RE.get_or_init(|| Regex::new(
+        r"(?m)^\s*(\d{1,3}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,3}:\d{2}:\d{2}[,.]\d{1,3})(?:\s+.*)?$"
+    ).unwrap())
+}
 
-pub fn parse_srt_time(s: &str) -> f64 {
-    // HH:MM:SS,mmm
-    let s = s.trim();
-    let (hms, ms_part) = s.split_once(',').unwrap_or((s, "0"));
-    let parts: Vec<f64> = hms.split(':').map(|p| p.parse().unwrap_or(0.0)).collect();
-    let (h, m, sec) = match parts.as_slice() {
-        [h, m, s] => (*h, *m, *s),
-        [m, s]    => (0.0, *m, *s),
-        [s]       => (0.0, 0.0, *s),
-        _         => (0.0, 0.0, 0.0),
+pub fn parse_srt_time(value: &str) -> Option<f64> {
+    let normalized = value.trim().replace('.', ",");
+    let (hms, ms) = normalized.split_once(',')?;
+    let mut parts = hms.split(':');
+    let h: u64 = parts.next()?.parse().ok()?;
+    let m: u64 = parts.next()?.parse().ok()?;
+    let s: u64 = parts.next()?.parse().ok()?;
+    let ms_digits = ms.trim();
+    let millis: u64 = match ms_digits.len() {
+        0 => 0,
+        1 => ms_digits.parse::<u64>().ok()? * 100,
+        2 => ms_digits.parse::<u64>().ok()? * 10,
+        _ => ms_digits[..3.min(ms_digits.len())].parse().ok()?,
     };
-    h * 3600.0 + m * 60.0 + sec + ms_part.parse::<f64>().unwrap_or(0.0) / 1000.0
+    Some((h * 3600 + m * 60 + s) as f64 + millis as f64 / 1000.0)
 }
 
 pub fn format_srt_time(seconds: f64) -> String {
-    let s = seconds.max(0.0);
-    let h = (s / 3600.0).floor() as u32;
-    let m = ((s % 3600.0) / 60.0).floor() as u32;
-    let sec = (s % 60.0).floor() as u32;
-    let ms = ((s % 1.0) * 1000.0).round() as u32;
-    format!("{:02}:{:02}:{:02},{:03}", h, m, sec, ms)
+    let total_ms = (seconds.max(0.0) * 1000.0).round() as u64;
+    let h = total_ms / 3_600_000;
+    let m = (total_ms / 60_000) % 60;
+    let s = (total_ms / 1000) % 60;
+    let ms = total_ms % 1000;
+    format!("{h:02}:{m:02}:{s:02},{ms:03}")
 }
 
-// ─── SRT parse / generate ─────────────────────────────────────────────────────
-
-pub fn parse_srt_to_lines(srt: &str) -> Vec<SubtitleLine> {
-    let normalized = srt.replace("\r\n", "\n").replace('\r', "\n");
-    let mut lines: Vec<SubtitleLine> = Vec::new();
-    let mut id = 0u32;
-
-    for block in normalized.trim().split("\n\n") {
-        let parts: Vec<&str> = block.splitn(3, '\n').collect();
-        if parts.len() < 3 { continue; }
-        let timecode = parts[1];
-        let text = parts[2].trim();
-        if let Some((start_str, end_str)) = timecode.split_once(" --> ") {
-            let start = parse_srt_time(start_str);
-            let end   = parse_srt_time(end_str);
-            if !text.is_empty() {
-                lines.push(SubtitleLine { id, start, end, text: text.to_string(), words: None });
-                id += 1;
-            }
-        }
+pub fn parse_srt_to_lines(input: &str) -> Vec<SubtitleLine> {
+    let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
+    let mut lines = Vec::new();
+    let chunks: Vec<&str> = normalized.split("\n\n").collect();
+    for chunk in chunks {
+        let rows: Vec<&str> = chunk.lines().collect();
+        if rows.len() < 2 { continue; }
+        let time_idx = rows.iter().position(|row| timecode_re().is_match(row));
+        let Some(time_idx) = time_idx else { continue; };
+        let caps = timecode_re().captures(rows[time_idx]).unwrap();
+        let (Some(start), Some(end)) = (parse_srt_time(&caps[1]), parse_srt_time(&caps[2])) else { continue; };
+        let text = rows.iter().skip(time_idx + 1).copied().collect::<Vec<_>>().join("\n").trim().to_string();
+        if text.is_empty() { continue; }
+        lines.push(SubtitleLine { id: lines.len() as u32, start, end, text, words: None });
     }
-    normalize_and_fix_overlaps(&lines)
+    normalize_subtitles(&lines, NormalizeOptions::default()).lines
 }
 
 pub fn generate_srt_content(lines: &[SubtitleLine]) -> String {
-    let safe = normalize_and_fix_overlaps(lines);
-    safe.iter()
-        .enumerate()
-        .map(|(i, l)| {
-            format!(
-                "{}\n{} --> {}\n{}\n",
-                i + 1,
-                format_srt_time(l.start),
-                format_srt_time(l.end),
-                l.text
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let normalized = normalize_subtitles(lines, NormalizeOptions::default()).lines;
+    normalized.iter().enumerate().map(|(idx, line)| {
+        format!("{}\n{} --> {}\n{}\n", idx + 1, format_srt_time(line.start), format_srt_time(line.end), line.text)
+    }).collect::<Vec<_>>().join("\n")
 }
 
-// ─── ASS time helpers ─────────────────────────────────────────────────────────
-
-pub fn parse_ass_time(s: &str) -> f64 {
-    // H:MM:SS.cc
-    let s = s.trim();
-    let parts: Vec<&str> = s.splitn(3, ':').collect();
-    if parts.len() != 3 { return 0.0; }
-    let h: f64 = parts[0].parse().unwrap_or(0.0);
-    let m: f64 = parts[1].parse().unwrap_or(0.0);
-    let sec: f64 = parts[2].parse().unwrap_or(0.0); // SS.cc
-    h * 3600.0 + m * 60.0 + sec
+pub fn parse_ass_time(value: &str) -> Option<f64> {
+    let mut parts = value.trim().split(':');
+    let h: u64 = parts.next()?.parse().ok()?;
+    let m: u64 = parts.next()?.parse().ok()?;
+    let sec: f64 = parts.next()?.parse().ok()?;
+    Some(h as f64 * 3600.0 + m as f64 * 60.0 + sec)
 }
 
-// ─── ASS parse ────────────────────────────────────────────────────────────────
-
-fn strip_ass_tags(s: &str) -> String {
-    // Remove {tags} and replace \N with newline
-    let mut out = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for c in s.chars() {
-        match c {
-            '{' => in_tag = true,
-            '}' => in_tag = false,
-            _ if !in_tag => out.push(c),
+fn strip_ass_tags(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut depth = 0usize;
+    for ch in input.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' if depth > 0 => depth -= 1,
+            _ if depth == 0 => out.push(ch),
             _ => {}
         }
     }
-    out.replace("\\N", "\n").replace("\\n", "\n")
+    out.replace("\\N", "\n").replace("\\n", "\n").trim().to_string()
 }
 
-pub fn parse_ass_to_lines(ass: &str) -> Vec<SubtitleLine> {
-    let events_start = match ass.find("[Events]") {
-        Some(i) => i,
-        None => return vec![],
-    };
-    let events_text = &ass[events_start..];
+#[derive(Debug)]
+struct AutoSubsGroup {
+    start: f64,
+    end: f64,
+    text: String,
+}
 
-    let mut lines: Vec<SubtitleLine> = Vec::new();
-    // Deduplicate pop-mode duplicate entries by (start_cs, end_cs, text)
-    let mut seen: HashSet<(i64, i64, String)> = HashSet::new();
-    let mut id = 0u32;
+pub fn parse_ass_to_lines(input: &str) -> Vec<SubtitleLine> {
+    let Some(events_index) = input.find("[Events]") else { return Vec::new(); };
+    let mut normal = Vec::new();
+    let mut autosubs: BTreeMap<String, AutoSubsGroup> = BTreeMap::new();
 
-    for line in events_text.lines() {
-        if !line.starts_with("Dialogue:") { continue; }
-        let after_dialogue = &line[9..]; // skip "Dialogue:"
-        let parts: Vec<&str> = after_dialogue.splitn(10, ',').collect();
+    for row in input[events_index..].lines() {
+        if !row.trim_start().starts_with("Dialogue:") { continue; }
+        let payload = row.trim_start().trim_start_matches("Dialogue:").trim_start();
+        let parts: Vec<&str> = payload.splitn(10, ',').collect();
         if parts.len() < 10 { continue; }
-        let start_str = parts[1].trim();
-        let end_str   = parts[2].trim();
-        let raw_text  = parts[9..].join(",");
-        let text = strip_ass_tags(&raw_text).trim().to_string();
+        let (Some(start), Some(end)) = (parse_ass_time(parts[1]), parse_ass_time(parts[2])) else { continue; };
+        let name = parts[4].trim();
+        let text = strip_ass_tags(parts[9]);
         if text.is_empty() { continue; }
 
-        let start = parse_ass_time(start_str);
-        let end   = parse_ass_time(end_str);
-
-        // Deduplicate by line boundary (not word boundary)
-        let key = (
-            (start * 100.0).round() as i64,
-            (end   * 100.0).round() as i64,
-            text.clone(),
-        );
-        if !seen.insert(key) { continue; }
-
-        lines.push(SubtitleLine { id, start, end, text, words: None });
-        id += 1;
+        if name.starts_with("autosubs:") {
+            autosubs.entry(name.to_string())
+                .and_modify(|group| {
+                    group.start = group.start.min(start);
+                    group.end = group.end.max(end);
+                    if group.text.is_empty() { group.text = text.clone(); }
+                })
+                .or_insert(AutoSubsGroup { start, end, text });
+        } else {
+            normal.push(SubtitleLine { id: 0, start, end, text, words: None });
+        }
     }
-    normalize_and_fix_overlaps(&lines)
+
+    for group in autosubs.into_values() {
+        normal.push(SubtitleLine { id: 0, start: group.start, end: group.end, text: group.text, words: None });
+    }
+    normalize_subtitles(&normal, NormalizeOptions::default()).lines
+}
+
+#[allow(dead_code)]
+fn _keep_word_type_used(_: SubtitleWord) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn srt_time_rounding_carries_into_next_second() {
+        assert_eq!(format_srt_time(59.9996), "00:01:00,000");
+    }
+
+    #[test]
+    fn parses_multiline_srt_without_requiring_numeric_index() {
+        let srt = "00:00:01,000 --> 00:00:02,000\nBonjour\nle monde\n";
+        let lines = parse_srt_to_lines(srt);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "Bonjour\nle monde");
+    }
+
+    #[test]
+    fn groups_autosubs_pop_dialogues_by_name() {
+        let ass = r#"[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:01.40,Default,autosubs:7,0,0,0,,{\c&H00FF00&}BONJOUR MONDE
+Dialogue: 0,0:00:01.40,0:00:02.00,Default,autosubs:7,0,0,0,,BONJOUR {\c&H00FF00&}MONDE
+"#;
+        let lines = parse_ass_to_lines(ass);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "BONJOUR MONDE");
+        assert!((lines[0].start - 1.0).abs() < 0.001);
+        assert!((lines[0].end - 2.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn ass_text_with_commas_survives_splitn() {
+        let ass = r#"[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Salut, monde, ça va ?
+"#;
+        let lines = parse_ass_to_lines(ass);
+        assert_eq!(lines[0].text, "Salut, monde, ça va ?");
+    }
 }
