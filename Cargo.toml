@@ -1,0 +1,58 @@
+[package]
+name = "autosubs"
+version = "2.0.0"
+edition = "2021"
+authors = ["Arezki Chougar"]
+description = "AutoSubs — automated animated subtitle burning, Rust core"
+
+[[bin]]
+name = "autosubs"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio          = { version = "1",    features = ["full"] }
+tokio-stream   = { version = "0.1",  features = ["sync"] }
+tokio-util     = { version = "0.7",  features = ["io"] }
+futures        = "0.3"
+
+# HTTP server
+axum           = { version = "0.8",  features = ["multipart"] }
+tower          = "0.5"
+tower-http     = { version = "0.6",  features = ["cors", "fs", "set-header"] }
+
+# HTTP client (Whisper API, LLM)
+reqwest        = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
+
+# Serialisation
+serde          = { version = "1",    features = ["derive"] }
+serde_json     = "1"
+
+# Error handling
+anyhow         = "1"
+thiserror      = "2"
+
+# IDs
+uuid           = { version = "1",    features = ["v4"] }
+
+# File watching
+notify         = "7"
+
+# Concurrency state (lock-free HashMap)
+dashmap        = "6"
+
+# Tracing
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI / env config
+clap           = { version = "4",    features = ["derive", "env"] }
+
+# Byte manipulation
+bytes          = "1"
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+strip         = true

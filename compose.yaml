@@ -1,0 +1,27 @@
+services:
+  autosubs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: autosubs:2
+    restart: unless-stopped
+    ports:
+      - "3050:3000"
+    user: "1000:1000"
+    environment:
+      - DATA_DIR=/app/data
+      - FONTS_DIR=/app/fonts
+      - DIST_DIR=/app/dist
+      - SPEACHES_URL=${SPEACHES_URL:-http://speaches:8000/v1/audio/transcriptions}
+      - MAX_ENCODE_JOBS=2
+    volumes:
+      - /mnt/SAL/App_Data/autosubs/data:/app/data
+      - /mnt/SAL/App_Data/autosubs/fonts:/app/fonts:ro
+      - /mnt/SAL/App_Data/autosubs/output:/app/output
+      - /mnt/SAL/App_Data/autosubs/archives:/app/archives
+      - /mnt/SAL/App_Data/autosubs/watch:/app/watch
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/settings"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
