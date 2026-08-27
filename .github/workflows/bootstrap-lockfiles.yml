@@ -7,7 +7,10 @@ on:
 
 permissions:
   contents: write
-  actions: write
+
+concurrency:
+  group: bootstrap-lockfiles-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   bootstrap:
@@ -60,8 +63,3 @@ jobs:
           git commit -m 'chore: add reproducible lockfiles'
           git push origin HEAD:main
 
-      - name: Run CI on the lockfile commit
-        if: steps.locks.outputs.needed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci.yml --ref main

@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/GodsQuantum/AutoSubs/security/policy
     about: Do not open a public issue for a vulnerability.
   - name: Support
-    url: https://github.com/GodsQuantum/AutoSubs/blob/main/SUPPORT.md
+    url: https://github.com/GodsQuantum/AutoSubs/blob/main/.github/SUPPORT.md
     about: Deployment and troubleshooting guidance.

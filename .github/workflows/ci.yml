@@ -18,24 +18,16 @@ jobs:
   lockfiles:
     name: Lockfiles
     runs-on: ubuntu-latest
-    outputs:
-      ready: ${{ steps.check.outputs.ready }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: check
-        shell: bash
+      - name: Verify reproducible lockfiles
         run: |
-          if [[ -s Cargo.lock && -s frontend/package-lock.json ]]; then
-            echo 'ready=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo 'Lockfiles are being bootstrapped by bootstrap-lockfiles.yml.'
-          fi
+          test -s Cargo.lock
+          test -s frontend/package-lock.json
 
   rust:
     name: Rust
     needs: lockfiles
-    if: needs.lockfiles.outputs.ready == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,7 +49,6 @@ jobs:
   frontend:
     name: Frontend
     needs: lockfiles
-    if: needs.lockfiles.outputs.ready == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -77,7 +68,6 @@ jobs:
   docker:
     name: Container
     needs: [lockfiles, rust, frontend]
-    if: needs.lockfiles.outputs.ready == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

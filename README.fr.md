@@ -26,7 +26,7 @@ AutoSubs s'occupe de ce qui arrive **une fois la vidéo prête** : récupérer l
 
 Le navigateur n'est pas le moteur métier. Rust possède la normalisation des timings, le découpage des lignes, la persistance, le rendu et l'état des workflows. L'UI appelle cette API : un traitement manuel et un traitement automatique passent donc par les mêmes règles.
 
-## Aperçus
+## 📸 Aperçus
 
 <p align="center"><img src="docs/screenshot-queue.svg" width="900" alt="File de production AutoSubs"></p>
 <p align="center"><i>File — uploads locaux reprenables et fichiers déjà montés alimentent la même file persistante.</i></p>
@@ -37,7 +37,7 @@ Le navigateur n'est pas le moteur métier. Rust possède la normalisation des ti
 <p align="center"><img src="docs/screenshot-mobile.svg" width="900" alt="Interface mobile AutoSubs"></p>
 <p align="center"><i>L'interface est pensée pour desktop, tablette et téléphone ; ce n'est pas simplement la version desktop compressée.</i></p>
 
-## Fonctionnalités
+## ✨ Fonctionnalités
 
 - **Ingest vidéo sans mini-liste d'extensions** — `ffprobe` décide si un fichier stable contient réellement une piste vidéo.
 - **Uploads reprenables** — protocole de type tus 1.0 avec `HEAD`/`PATCH`; après coupure ou reload, resélectionner le même fichier reprend à l'offset du serveur.
@@ -60,7 +60,7 @@ Le navigateur n'est pas le moteur métier. Rust possède la normalisation des ti
 - **Outro robuste** — normalisation canvas/FPS/audio puis concat dans le même encodage.
 - **UI EN / FR** — switch instantané mémorisé dans le navigateur, totalement indépendant de la langue de transcription.
 
-## Installation
+## 🚀 Installation
 
 L'image préconstruite est `ghcr.io/godsquantum/autosubs:latest`.
 
@@ -111,7 +111,7 @@ volumes:
   - /mnt/NAS:/mnt/NAS
 ```
 
-## Flux manuel
+## 🎬 Flux manuel
 
 1. Ajoute une vidéo locale, une vidéo déjà montée, ou une paire vidéo + `.srt` / `.ass` / `.json`.
 2. AutoSubs inspecte le média puis importe ou génère les timings.
@@ -141,7 +141,7 @@ résolution globale/par défaut
 
 Le format choisi par le Job reste l'autorité. Sélectionner un preset ne transforme pas silencieusement un Job 16:9 en 9:16.
 
-## Dossiers surveillés
+## 🔄 Dossiers surveillés
 
 Les Workflows utilisent à la fois les événements filesystem locaux et une réconciliation périodique. C'est nécessaire sur NFS : un write distant ne provoque pas forcément l'événement inotify local attendu.
 
@@ -161,7 +161,7 @@ Pour Intel/AMD Linux, expose `/dev/dri` et les groupes video/render nécessaires
 
 Le mode `auto` reste volontairement simple : si l'encodeur matériel choisi ne démarre pas, le rendu est retenté une fois en `libx264`.
 
-## Configuration
+## ⚙️ Configuration
 
 | Variable | Défaut | Rôle |
 |---|---|---|
@@ -206,11 +206,13 @@ docker build -t autosubs:dev .
 
 Node sert uniquement à construire SvelteKit. Il n'est pas présent dans l'image runtime.
 
-## Sécurité
+Les contributions sont bienvenues — voir [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). Pour l’aide au déploiement et au dépannage, voir [.github/SUPPORT.md](.github/SUPPORT.md).
+
+## 🔒 Sécurité
 
 AutoSubs peut lire/écrire les volumes média montés et lancer FFmpeg dessus. Ne l'expose pas directement à Internet : place-le derrière ton reverse proxy/VPN authentifié habituel et ne monte que les chemins nécessaires.
 
-Voir [SECURITY.md](SECURITY.md).
+Voir [politique de sécurité](.github/SECURITY.md).
 
 ## Licence
 

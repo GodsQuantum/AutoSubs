@@ -26,7 +26,7 @@ AutoSubs is for the part that happens **after you have a video**: get word timin
 
 It is deliberately not a browser-only subtitle toy. The Rust backend owns timing normalization, segmentation, persistence, rendering and workflow state. The web UI is a client of that API, so manual jobs and automated jobs go through the same rules.
 
-## Screenshots
+## 📸 Screenshots
 
 <p align="center"><img src="docs/screenshot-queue.svg" width="900" alt="AutoSubs production queue"></p>
 <p align="center"><i>Queue — local/resumable uploads and server-side files feed the same persistent job system.</i></p>
@@ -37,7 +37,7 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 <p align="center"><img src="docs/screenshot-mobile.svg" width="900" alt="AutoSubs responsive mobile interface"></p>
 <p align="center"><i>The interface is designed for desktop, tablet and phone — not just squeezed into a smaller viewport.</i></p>
 
-## What it does
+## ✨ What it does
 
 - **Video ingest without a tiny extension allow-list** — AutoSubs asks `ffprobe` whether a stable file actually contains video.
 - **Resumable browser uploads** — tus 1.0-style `HEAD`/`PATCH` uploads resume after network loss; re-selecting the same file after a reload resumes from the server offset.
@@ -60,7 +60,7 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 - **Outro normalization** — main video and outro are normalized into one concat graph so different dimensions/FPS/audio layouts do not require a fragile stream-copy concat.
 - **EN / FR UI** — instant browser-local language switch. This is separate from the transcription language setting.
 
-## Install
+## 🚀 Install
 
 The pre-built image is published as `ghcr.io/godsquantum/autosubs:latest`.
 
@@ -124,7 +124,7 @@ Provider environment variables **bootstrap an empty database only**. After first
 
 For migration, the old `SPEACHES_URL` variable is still accepted as a first-boot alias for `AUTOSUBS_LOCAL_TRANSCRIPTION_URL`.
 
-## Manual production flow
+## 🎬 Manual production flow
 
 1. Add a local video, choose a server-side video, or pair a video with `.srt` / `.ass` / `.json`.
 2. AutoSubs probes the media and imports or generates subtitle word timings.
@@ -154,7 +154,7 @@ global/default preset resolution
 
 The Job's selected output format remains authoritative. Picking a preset does not silently turn a 16:9 job back into 9:16.
 
-## Watch folders
+## 🔄 Watch folders
 
 Workflows combine low-latency filesystem events with periodic reconciliation. This matters on NFS: a remote write does not necessarily produce the local inotify event you expected.
 
@@ -174,7 +174,7 @@ For Intel/AMD Linux acceleration, expose `/dev/dri` to the container and add the
 
 `auto` is conservative: if a selected hardware encoder fails to launch, that render is retried once with `libx264`. It does not silently loop through six encoders.
 
-## Configuration
+## ⚙️ Configuration
 
 Core runtime variables:
 
@@ -270,6 +270,8 @@ docker build -t autosubs:dev .
 
 `main` is gated by CI for Rust, SvelteKit and Docker. Dependency updates cover Cargo, npm, Docker and GitHub Actions. Tagged releases publish multi-architecture GHCR images with SBOM/provenance metadata.
 
+Contributions are welcome — see [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). For usage help, see [.github/SUPPORT.md](.github/SUPPORT.md).
+
 ## Project layout
 
 ```text
@@ -284,11 +286,11 @@ tests/            backend regression/integration tests
 docs/             docs and versioned UI previews
 ```
 
-## Security
+## 🔒 Security
 
 AutoSubs can read and write mounted media paths and can invoke FFmpeg on them. Do not expose it directly to the public Internet. Put it behind your normal authenticated reverse proxy/VPN and mount only the directories it actually needs.
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting and deployment notes.
+See [security policy](.github/SECURITY.md) for vulnerability reporting and deployment notes.
 
 ## License
 
