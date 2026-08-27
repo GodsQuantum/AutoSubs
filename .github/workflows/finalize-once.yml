@@ -200,19 +200,47 @@ jobs:
             false
           fi
 
-      - name: Commit validated production tree
+      - name: Publish validated staging tree
         shell: bash
         run: |
+          # Runtime smoke creates SQLite state under .ci.
+          # It is test residue and must never enter the repository.
+          rm -rf .ci
+
+          # Preserve the hardened CI produced by the audited script,
+          # but outside .github/workflows so GITHUB_TOKEN may push it.
+          cp .github/workflows/ci.yml .github/ci.final.yml
+
+          # GITHUB_TOKEN cannot update workflow files. Restore those
+          # paths exactly to the checkout commit for the staging push.
+          git restore --source=HEAD -- .github/workflows/ci.yml
+          git restore --source=HEAD -- .github/workflows/finalize-once.yml
+          git restore --source=HEAD -- .github/workflows/sync-lockfiles.yml
+
+          test ! -e .ci
+          test -f .github/ci.final.yml
           git diff --check
+
           git add -A
+
+          if git diff --cached --name-only | grep -q '^.github/workflows/'
+          then
+            echo "::error::Staging commit unexpectedly changes workflow files"
+            git diff --cached --name-status
+            false
+          fi
+
+          if git diff --cached --name-only | grep -q '^.ci/'
+          then
+            echo "::error::Runtime residue would enter staging"
+            false
+          fi
+
+          git status --short
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git commit -m "fix: complete production validation"
-          git push origin HEAD:main
+          git commit -m "fix: validated AutoSubs production tree"
 
-      - name: Dispatch canonical CI
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci.yml --repo "${{ github.repository }}" --ref main
+          git push --force             origin             HEAD:refs/heads/autosubs-validated-staging
