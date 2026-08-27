@@ -1,20 +1,20 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1
 
-FROM node:24-bookworm-slim AS frontend
+FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run check && npm test && npm run build
 
-FROM rust:1.98-bookworm AS builder
+FROM rust:1.98.0-trixie@sha256:7f7a53a25a0319dd8284e279d529d45759cb384d59b14cc6806132910f45522e AS builder
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY rust-toolchain.toml ./
 COPY src ./src
 RUN cargo build --release --locked
 
-FROM debian:trixie-slim AS runtime
+FROM debian:trixie-20260824-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_HOST=0.0.0.0 \
     AUTOSUBS_PORT=3000 \

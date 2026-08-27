@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -17,7 +15,7 @@ concurrency:
 jobs:
   lockfiles:
     name: Lockfiles
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify reproducible lockfiles
@@ -28,28 +26,28 @@ jobs:
   rust:
     name: Rust
     needs: lockfiles
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Rust 1.98
+      - name: Install Rust 1.98.0
         run: |
           rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt
           rustup default 1.98.0
       - name: Format
-        run: cargo fmt --check
+        run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Tests
-        run: cargo test --all --locked
+        run: cargo test --locked --all-features
       - name: Dependency audit
         run: |
           cargo install cargo-audit --version 0.22.2 --locked
-          cargo audit
+          cargo audit --file Cargo.lock
 
   frontend:
     name: Frontend
     needs: lockfiles
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -57,7 +55,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: '24.19.0'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -68,7 +66,7 @@ jobs:
   docker:
     name: Container
     needs: [lockfiles, rust, frontend]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build runtime image
@@ -84,11 +82,13 @@ jobs:
             -v "$PWD/.ci/media:/media" \
             autosubs-ci
           trap 'docker rm -f autosubs-ci >/dev/null 2>&1 || true' EXIT
+          HEALTH=""
           for _ in $(seq 1 40); do
             HEALTH="$(docker exec autosubs-ci curl -fsS http://127.0.0.1:3000/api/v1/health 2>/dev/null || true)"
             case "$HEALTH" in *'"status":"ok"'*) break;; esac
             sleep 1
           done
           printf '%s\n' "$HEALTH"
+          echo "$HEALTH" | grep -q '"status":"ok"'
           echo "$HEALTH" | grep -q '"ffmpegReady":true'
           echo "$HEALTH" | grep -q '"libass":true'

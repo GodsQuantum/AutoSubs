@@ -69,7 +69,7 @@ mkdir autosubs && cd autosubs
 curl -O https://raw.githubusercontent.com/GodsQuantum/AutoSubs/main/compose.example.yaml
 curl -O https://raw.githubusercontent.com/GodsQuantum/AutoSubs/main/.env.example
 cp .env.example .env
-mkdir -p data/config data/app fonts media
+mkdir -p config data fonts media
 # adapte MEDIA_PATH et les mounts, puis :
 docker compose -f compose.example.yaml up -d
 ```
@@ -94,7 +94,7 @@ Les variables ont été renommées pour éviter les ambiguïtés :
 ```text
 DATA_DIR         → AUTOSUBS_DATA_DIR=/data
 FONTS_DIR        → AUTOSUBS_FONTS_DIR=/fonts
-DIST_DIR         → supprimée en pratique : l'UI est intégrée dans /app/web
+DIST_DIR         → supprimée : l'UI est intégrée directement à l'image
 MAX_ENCODE_JOBS  → AUTOSUBS_MAX_RENDER_JOBS
 SPEACHES_URL     → AUTOSUBS_LOCAL_TRANSCRIPTION_URL
 ```
@@ -113,7 +113,7 @@ volumes:
 
 ## 🎬 Flux manuel
 
-1. Ajoute une vidéo locale, une vidéo déjà montée, ou une paire vidéo + `.srt` / `.ass` / `.json`.
+1. Ajoute une vidéo locale, une vidéo déjà montée, ou une paire vidéo + `.srt` / `.ass` / `.ssa` / `.json`.
 2. AutoSubs inspecte le média puis importe ou génère les timings.
 3. La correction LLM optionnelle ne touche qu'au texte.
 4. Le moteur Rust normalise timings et regroupement.
@@ -190,9 +190,9 @@ Le picker canonicalise les chemins après résolution des symlinks et refuse tou
 ## Développement
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all --locked
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
 
 cd frontend
 npm ci

@@ -69,7 +69,7 @@ mkdir autosubs && cd autosubs
 curl -O https://raw.githubusercontent.com/GodsQuantum/AutoSubs/main/compose.example.yaml
 curl -O https://raw.githubusercontent.com/GodsQuantum/AutoSubs/main/.env.example
 cp .env.example .env
-mkdir -p data/config data/app fonts media
+mkdir -p config data fonts media
 # adjust MEDIA_PATH / bind mounts as needed, then:
 docker compose -f compose.example.yaml up -d
 ```
@@ -126,7 +126,7 @@ For migration, the old `SPEACHES_URL` variable is still accepted as a first-boot
 
 ## 🎬 Manual production flow
 
-1. Add a local video, choose a server-side video, or pair a video with `.srt` / `.ass` / `.json`.
+1. Add a local video, choose a server-side video, or pair a video with `.srt` / `.ass` / `.ssa` / `.json`.
 2. AutoSubs probes the media and imports or generates subtitle word timings.
 3. Optional LLM correction runs on text only.
 4. The canonical Rust engine normalizes timings and grouping.
@@ -253,9 +253,9 @@ The release build uses Node only as a frontend build stage. The runtime image co
 
 ```bash
 # Rust
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all --locked
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
 
 # Frontend
 cd frontend
@@ -276,14 +276,14 @@ Contributions are welcome — see [.github/CONTRIBUTING.md](.github/CONTRIBUTING
 
 ```text
 src/api/          HTTP/SSE/tus endpoints
-src/jobs/         persistent queue + job runner
+src/jobs.rs       persistent queue + job runner
 src/media/        ffprobe, transcription, FFmpeg plans and rendering
 src/subtitle/     SRT/ASS, timing normalization, segmentation, LLM correction
-src/workflows/    watcher supervisor + periodic reconciliation
-frontend/         SvelteKit static client
-migrations/       SQLite migrations
-tests/            backend regression/integration tests
+src/workflows.rs  watcher supervisor + periodic reconciliation
+frontend/         SvelteKit static client + frontend tests
 docs/             docs and versioned UI previews
+
+Rust regression tests live next to the modules they exercise under `#[cfg(test)]`.
 ```
 
 ## 🔒 Security

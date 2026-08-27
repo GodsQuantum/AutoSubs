@@ -12,7 +12,7 @@ AutoSubs is intentionally opinionated: one Rust backend owns media/subtitle rule
 ```bash
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test --locked --all
+cargo test --locked --all-features
 
 cd frontend
 npm ci
