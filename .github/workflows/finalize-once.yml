@@ -225,6 +225,81 @@ jobs:
           )
 
           # --------------------------------------------------
+          # Rust fixes proven by strict Clippy v3.
+          # --------------------------------------------------
+
+          # Stable descending chronological ordering without
+          # unnecessary_sort_by.
+          replace(
+              "src/api/jobs.rs",
+              "jobs.sort_by(|a,b| b.created_at_ms.cmp(&a.created_at_ms));",
+              "jobs.sort_by_key(|job| std::cmp::Reverse(job.created_at_ms));",
+              1,
+          )
+
+          # Initialize changed Default fields directly.
+          replace(
+              "src/state.rs",
+              'let mut base = Preset::default(); base.name = "Default".into(); base.migrate();',
+              'let mut base = Preset { name: "Default".into(), ..Preset::default() }; base.migrate();',
+              1,
+          )
+
+          # Render tests: construct the requested format directly.
+          replace(
+              "src/media/render.rs",
+              "let mut preset = Preset::default();\n"
+              "        preset.format = FormatProfile::default();",
+              "let preset = Preset::default();",
+              1,
+          )
+
+          replace(
+              "src/media/render.rs",
+              "let mut preset = Preset::default();\n"
+              "        preset.format = FormatProfile { key: FormatKey::Portrait916, fit: FitMode::Cover, width: None, height: None };",
+              "let preset = Preset {\n"
+              "            format: FormatProfile { key: FormatKey::Portrait916, fit: FitMode::Cover, width: None, height: None },\n"
+              "            ..Preset::default()\n"
+              "        };",
+              1,
+          )
+
+          replace(
+              "src/media/render.rs",
+              "let mut preset = Preset::default();\n"
+              "        preset.format = FormatProfile { key: FormatKey::Square11, fit: FitMode::Preserve, width: None, height: None };",
+              "let preset = Preset {\n"
+              "            format: FormatProfile { key: FormatKey::Square11, fit: FitMode::Preserve, width: None, height: None },\n"
+              "            ..Preset::default()\n"
+              "        };",
+              1,
+          )
+
+          # ASS tests: same direct-initialization rule.
+          replace(
+              "src/subtitle/ass.rs",
+              "let mut preset = Preset::default();\n"
+              "        preset.format = FormatProfile { key: FormatKey::Source, fit: FitMode::Preserve, width: None, height: None };",
+              "let preset = Preset {\n"
+              "            format: FormatProfile { key: FormatKey::Source, fit: FitMode::Preserve, width: None, height: None },\n"
+              "            ..Preset::default()\n"
+              "        };",
+              1,
+          )
+
+          replace(
+              "src/subtitle/ass.rs",
+              "let mut preset = Preset::default();\n"
+              "        preset.format = FormatProfile { key: FormatKey::Square11, fit: FitMode::Cover, width: None, height: None };",
+              "let preset = Preset {\n"
+              "            format: FormatProfile { key: FormatKey::Square11, fit: FitMode::Cover, width: None, height: None },\n"
+              "            ..Preset::default()\n"
+              "        };",
+              1,
+          )
+
+          # --------------------------------------------------
           # Canonical CI must validate direct pushes to main.
           # --------------------------------------------------
 
@@ -310,16 +385,20 @@ jobs:
         run: npm ci
 
       - name: Frontend dependency audit
+        id: npm_audit
+        continue-on-error: true
         working-directory: frontend
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=low
 
       - name: Frontend regression tests
         working-directory: frontend
         run: npm test
 
       - name: Frontend TypeScript / Svelte validation
+        id: svelte_check
+        continue-on-error: true
         working-directory: frontend
-        run: npm run check
+        run: npm run check -- --fail-on-warnings --output machine-verbose
 
       - name: Frontend production build
         working-directory: frontend
@@ -358,7 +437,21 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Strict Clippy
+        id: strict_clippy
+        continue-on-error: true
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Frontend / dependency / Clippy quality gate
+        if: always()
+        shell: bash
+        run: |
+          echo "npm_audit=${{ steps.npm_audit.outcome }}"
+          echo "svelte_check=${{ steps.svelte_check.outcome }}"
+          echo "strict_clippy=${{ steps.strict_clippy.outcome }}"
+
+          test "${{ steps.npm_audit.outcome }}" = "success"
+          test "${{ steps.svelte_check.outcome }}" = "success"
+          test "${{ steps.strict_clippy.outcome }}" = "success"
 
       - name: Rust tests
         run: cargo test --locked --all-features
@@ -458,7 +551,7 @@ jobs:
           echo "$HEALTH" | grep -q '"libass":true'
 
       - name: Remove one-shot workflow
-        run: rm .github/workflows/finalize-once.yml
+        run: rm .github/workflows/finalize-once.yml .github/workflows/sync-lockfiles.yml
 
       - name: Commit validated corrections
         shell: bash
