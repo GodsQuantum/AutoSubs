@@ -300,6 +300,233 @@ jobs:
           )
 
           # --------------------------------------------------
+          # Frontend accessibility/security fixes proven by
+          # final quality gate run 33111620084.
+          # --------------------------------------------------
+
+          import json
+          import re
+
+          # Latest stable SvelteKit still resolves cookie 0.6.x.
+          # Force the patched, API-compatible pre-1.0 line.
+          package_path = Path("frontend/package.json")
+          package = json.loads(package_path.read_text())
+          overrides = package.get("overrides", {})
+          if not isinstance(overrides, dict):
+              raise SystemExit("frontend/package.json: overrides must be an object")
+          overrides["cookie"] = "0.7.2"
+          package["overrides"] = overrides
+          package_path.write_text(
+              json.dumps(package, indent=2, ensure_ascii=False) + "\n"
+          )
+
+          # Brand defaults are rendered inside an #each loop, so
+          # use a dynamic id rather than duplicating a static id.
+          replace(
+              "frontend/src/lib/views/BrandsView.svelte",
+              '<div class="field"><label>{formatLabel(key)}</label><select class="select"',
+              '<div class="field"><label for={`brand-default-${key}`}>{formatLabel(key)}</label><select id={`brand-default-${key}`} class="select"',
+              1,
+          )
+
+          # Associate every remaining plain field label with its
+          # first form control. Labels which wrap checkboxes use
+          # `class="check"` and are already semantically valid.
+          def associate_plain_labels(file_path, prefix):
+              p = Path(file_path)
+              value = p.read_text()
+              counter = 0
+
+              pattern = re.compile(
+                  r'<label>(?P<body>.*?)</label>'
+                  r'(?P<between>(?:(?!</div>|<label).)*?)'
+                  r'(?P<tag><(?:input|select|textarea)\b)',
+                  re.DOTALL,
+              )
+
+              def repl(match):
+                  nonlocal counter
+                  counter += 1
+                  control_id = f"{prefix}-field-{counter}"
+                  return (
+                      f'<label for="{control_id}">'
+                      f'{match.group("body")}</label>'
+                      f'{match.group("between")}'
+                      f'{match.group("tag")} id="{control_id}"'
+                  )
+
+              value, count = pattern.subn(repl, value)
+
+              if count == 0:
+                  raise SystemExit(
+                      f"{file_path}: no unassociated plain labels found"
+                  )
+
+              p.write_text(value)
+              print(f"{file_path}: associated {count} labels")
+
+          for file_path, prefix in [
+              ("frontend/src/lib/views/BrandsView.svelte", "brands"),
+              ("frontend/src/lib/views/EditorView.svelte", "editor"),
+              ("frontend/src/lib/views/PresetsView.svelte", "presets"),
+              ("frontend/src/lib/views/QueueView.svelte", "queue"),
+              ("frontend/src/lib/views/SettingsView.svelte", "settings"),
+              ("frontend/src/lib/views/WorkflowsView.svelte", "workflows"),
+          ]:
+              associate_plain_labels(file_path, prefix)
+
+          # API-key fields have two controls: the label above is
+          # associated with the action selector; explicitly name
+          # the password input as well.
+          replace(
+              "frontend/src/lib/views/SettingsView.svelte",
+              '<input class="input" type="password" disabled={transAction!==\'replace\'} bind:value={transKey}/>',
+              '<input class="input" type="password" aria-label={$dictionary.apiKey} disabled={transAction!==\'replace\'} bind:value={transKey}/>',
+              1,
+          )
+
+          replace(
+              "frontend/src/lib/views/SettingsView.svelte",
+              '<input class="input" type="password" disabled={localAction!==\'replace\'} bind:value={localKey}/>',
+              '<input class="input" type="password" aria-label={$dictionary.apiKey} disabled={localAction!==\'replace\'} bind:value={localKey}/>',
+              1,
+          )
+
+          replace(
+              "frontend/src/lib/views/SettingsView.svelte",
+              '<input class="input" type="password" disabled={llmAction!==\'replace\'} bind:value={llmKey}/>',
+              '<input class="input" type="password" aria-label={$dictionary.apiKey} disabled={llmAction!==\'replace\'} bind:value={llmKey}/>',
+              1,
+          )
+
+          # Real WebVTT generation for the editor preview rather
+          # than silencing Svelte's media-caption warning.
+          Path("frontend/src/lib/captions.js").write_text(r"""\
+          /**
+           * @typedef {{ start: number, end: number, text: string }} CaptionLine
+           */
+
+          /** @param {number} seconds */
+          function vttTime(seconds) {
+            const total = Math.max(0, Math.round(Number(seconds || 0) * 1000));
+            const hours = Math.floor(total / 3600000);
+            const minutes = Math.floor((total % 3600000) / 60000);
+            const secs = Math.floor((total % 60000) / 1000);
+            const millis = total % 1000;
+            return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
+          }
+
+          /**
+           * Build a browser-native WebVTT track for editor preview.
+           * @param {CaptionLine[]} lines
+           */
+          export function subtitlesToVtt(lines) {
+            const cues = lines.map((line, index) => {
+              const end = Math.max(Number(line.end || 0), Number(line.start || 0) + 0.001);
+              const text = String(line.text ?? '').replace(/\r/g, '');
+              return `${index + 1}\n${vttTime(line.start)} --> ${vttTime(end)}\n${text}\n`;
+            }).join('\n');
+
+            return `WEBVTT\n\n${cues}`;
+          }
+          """)
+
+          Path("frontend/tests/captions.test.mjs").write_text(r"""\
+          import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { subtitlesToVtt } from '../src/lib/captions.js';
+
+          test('subtitlesToVtt emits valid WebVTT timing and text', () => {
+            const vtt = subtitlesToVtt([
+              { start: 1.25, end: 2.5, text: 'Bonjour monde' }
+            ]);
+
+            assert.match(vtt, /^WEBVTT/);
+            assert.match(
+              vtt,
+              /00:00:01\.250 --> 00:00:02\.500/
+            );
+            assert.match(vtt, /Bonjour monde/);
+          });
+          """)
+
+          replace(
+              "frontend/src/lib/views/EditorView.svelte",
+              "  import { dictionary } from '$lib/i18n';\n",
+              "  import { dictionary } from '$lib/i18n';\n"
+              "  import { subtitlesToVtt } from '$lib/captions.js';\n",
+              1,
+          )
+
+          replace(
+              "frontend/src/lib/views/EditorView.svelte",
+              "  let fileInput:HTMLInputElement;\n",
+              "  let fileInput:HTMLInputElement;\n"
+              "  let captionTrackUrl='';\n",
+              1,
+          )
+
+          replace(
+              "frontend/src/lib/views/EditorView.svelte",
+              "  $: currentPreset = presets.find(p=>p.id===selectedPreset);\n",
+              "  $: currentPreset = presets.find(p=>p.id===selectedPreset);\n"
+              "  $: captionTrackUrl = "
+              "`data:text/vtt;charset=utf-8,${encodeURIComponent(subtitlesToVtt(lines))}`;\n",
+              1,
+          )
+
+          replace(
+              "frontend/src/lib/views/EditorView.svelte",
+              '<video id="autosubs-editor-video" src={videoUrl(job.id)} controls preload="metadata" playsinline on:timeupdate={(e)=>currentTime=(e.currentTarget as HTMLVideoElement).currentTime}></video>',
+              '<video id="autosubs-editor-video" src={videoUrl(job.id)} controls preload="metadata" playsinline on:timeupdate={(e)=>currentTime=(e.currentTarget as HTMLVideoElement).currentTime}><track kind="captions" src={captionTrackUrl} srclang="und" label={$dictionary.subtitles}></video>',
+              1,
+          )
+
+          # Permanent CI must enforce the same quality gates as
+          # this one-shot finalizer.
+          replace(
+              ".github/workflows/ci.yml",
+              "      - run: npm ci\n"
+              "      - run: npm test\n"
+              "      - run: npm run check\n"
+              "      - run: npm run build\n",
+              "      - run: npm ci\n"
+              "      - run: npm audit --audit-level=low\n"
+              "      - run: npm test\n"
+              "      - run: npm run check -- --fail-on-warnings --output machine-verbose\n"
+              "      - run: npm run build\n",
+              1,
+          )
+
+          # Regression test for API/static routing semantics.
+          ci_path = Path(".github/workflows/ci.yml")
+          ci_text = ci_path.read_text()
+
+          ci_old = """\
+          echo "$HEALTH" | grep -q '"libass":true'
+"""
+
+          ci_new = ci_old + """\
+          INDEX_STATUS="$(docker exec autosubs-ci sh -lc 'curl -sS -o /tmp/autosubs-index -w "%{http_code}" http://127.0.0.1:3000/')"
+          test "$INDEX_STATUS" = "200"
+          docker exec autosubs-ci grep -qi 'autosubs' /tmp/autosubs-index
+
+          API_404_STATUS="$(docker exec autosubs-ci sh -lc 'curl -sS -o /tmp/autosubs-api-404 -w "%{http_code}" http://127.0.0.1:3000/api/v1/definitely-not-a-route')"
+          test "$API_404_STATUS" = "404"
+          if docker exec autosubs-ci grep -qi '<!doctype html' /tmp/autosubs-api-404; then
+            echo "Unknown API route incorrectly fell through to SPA"
+            false
+          fi
+"""
+
+          if ci_text.count(ci_old) != 1:
+              raise SystemExit(
+                  ".github/workflows/ci.yml: runtime smoke marker mismatch"
+              )
+
+          ci_path.write_text(ci_text.replace(ci_old, ci_new, 1))
+
+          # --------------------------------------------------
           # Canonical CI must validate direct pushes to main.
           # --------------------------------------------------
 
@@ -379,6 +606,10 @@ jobs:
           node-version: '24.19.0'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Refresh frontend lockfile for security override
+        working-directory: frontend
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
       - name: Frontend dependencies
         working-directory: frontend
@@ -549,6 +780,18 @@ jobs:
           echo "$HEALTH" | grep -q '"status":"ok"'
           echo "$HEALTH" | grep -q '"ffmpegReady":true'
           echo "$HEALTH" | grep -q '"libass":true'
+
+          INDEX_STATUS="$(docker exec autosubs-final sh -lc 'curl -sS -o /tmp/autosubs-index -w "%{http_code}" http://127.0.0.1:3000/')"
+          test "$INDEX_STATUS" = "200"
+          docker exec autosubs-final grep -qi 'autosubs' /tmp/autosubs-index
+
+          API_404_STATUS="$(docker exec autosubs-final sh -lc 'curl -sS -o /tmp/autosubs-api-404 -w "%{http_code}" http://127.0.0.1:3000/api/v1/definitely-not-a-route')"
+          test "$API_404_STATUS" = "404"
+
+          if docker exec autosubs-final grep -qi '<!doctype html' /tmp/autosubs-api-404; then
+            echo "::error::Unknown API route incorrectly fell through to SPA"
+            false
+          fi
 
       - name: Remove one-shot workflow
         run: rm .github/workflows/finalize-once.yml .github/workflows/sync-lockfiles.yml
