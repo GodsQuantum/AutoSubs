@@ -1,0 +1,17 @@
+.git
+.github
+.gitignore
+.env
+.env.*
+target
+config
+data
+fonts
+media
+frontend/node_modules
+frontend/.svelte-kit
+frontend/build
+.superpowers
+*.log
+*.partial
+*.uploading

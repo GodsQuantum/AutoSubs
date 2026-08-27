@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lockfiles:
+    name: Lockfiles
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: check
+        shell: bash
+        run: |
+          if [[ -s Cargo.lock && -s frontend/package-lock.json ]]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo 'Lockfiles are being bootstrapped by bootstrap-lockfiles.yml.'
+          fi
+
+  rust:
+    name: Rust
+    needs: lockfiles
+    if: needs.lockfiles.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust 1.98
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.98.0
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - name: Tests
+        run: cargo test --all --locked
+      - name: Dependency audit
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit
+
+  frontend:
+    name: Frontend
+    needs: lockfiles
+    if: needs.lockfiles.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+
+  docker:
+    name: Container
+    needs: [lockfiles, rust, frontend]
+    if: needs.lockfiles.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build runtime image
+        run: docker build --pull -t autosubs-ci .
+      - name: Runtime capability smoke test
+        run: |
+          mkdir -p .ci/config .ci/data .ci/fonts .ci/media
+          chmod -R a+rwx .ci
+          docker run -d --rm --name autosubs-ci \
+            -v "$PWD/.ci/config:/config" \
+            -v "$PWD/.ci/data:/data" \
+            -v "$PWD/.ci/fonts:/fonts:ro" \
+            -v "$PWD/.ci/media:/media" \
+            autosubs-ci
+          trap 'docker rm -f autosubs-ci >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 40); do
+            HEALTH="$(docker exec autosubs-ci curl -fsS http://127.0.0.1:3000/api/v1/health 2>/dev/null || true)"
+            case "$HEALTH" in *'"status":"ok"'*) break;; esac
+            sleep 1
+          done
+          printf '%s\n' "$HEALTH"
+          echo "$HEALTH" | grep -q '"ffmpegReady":true'
+          echo "$HEALTH" | grep -q '"libass":true'
