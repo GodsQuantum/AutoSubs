@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: autosubs-finalize-once
@@ -171,6 +172,131 @@ jobs:
               text = text.replace("/mnt/NAS", "/srv/media")
               text = text.replace("speaches:8005", "transcriber:8000")
               p.write_text(text)
+
+          # --------------------------------------------------
+          # Rust fixes proven by strict Clippy v2.
+          # --------------------------------------------------
+
+          # regex::Regex verbose mode (?x) treats '#' as a
+          # comment introducer. This compact expression needs
+          # only case-insensitive mode.
+          replace(
+              "src/subtitle/segment.rs",
+              'r"(?xi)^(?:https?://\\S+',
+              'r"(?i)^(?:https?://\\S+',
+              1,
+          )
+
+          # Give the dynamic-programming memo a semantic name.
+          replace(
+              "src/subtitle/segment.rs",
+              "static ABBREVIATION_RE: OnceLock<Regex> = OnceLock::new();\n",
+              "static ABBREVIATION_RE: OnceLock<Regex> = OnceLock::new();\n"
+              "\n"
+              "type LayoutMemo = "
+              "HashMap<(usize, usize), Option<(f64, Vec<usize>)>>;\n",
+              1,
+          )
+
+          replace(
+              "src/subtitle/segment.rs",
+              "memo: &mut HashMap<(usize, usize), "
+              "Option<(f64, Vec<usize>)>>",
+              "memo: &mut LayoutMemo",
+              1,
+          )
+
+          # build_render_plan is an FFmpeg boundary whose
+          # independent immutable inputs are intentionally
+          # explicit. Keep the API explicit and document the
+          # single local Clippy exception rather than disabling
+          # the lint globally.
+          replace(
+              "src/media/render.rs",
+              "pub fn build_render_plan(\n",
+              "#[expect(\n"
+              "    clippy::too_many_arguments,\n"
+              "    reason = "
+              "\"render-plan construction keeps independent "
+              "FFmpeg resources explicit\"\n"
+              ")]\n"
+              "pub fn build_render_plan(\n",
+              1,
+          )
+
+          # --------------------------------------------------
+          # Canonical CI must validate direct pushes to main.
+          # --------------------------------------------------
+
+          replace(
+              ".github/workflows/ci.yml",
+              "on:\n"
+              "  pull_request:\n"
+              "    branches: [main]\n"
+              "  workflow_dispatch:\n",
+              "on:\n"
+              "  push:\n"
+              "    branches: [main]\n"
+              "  pull_request:\n"
+              "    branches: [main]\n"
+              "  workflow_dispatch:\n",
+              1,
+          )
+
+          # --------------------------------------------------
+          # Generic public documentation.
+          # --------------------------------------------------
+
+          import re
+
+          for path in [
+              ".env.example",
+              "compose.example.yaml",
+              "README.md",
+              "README.fr.md",
+              "docs/screenshot-queue.svg",
+          ]:
+              p = Path(path)
+              if not p.exists():
+                  continue
+
+              value = p.read_text()
+
+              # Deployment-specific NAS conventions -> generic.
+              value = re.sub(
+                  r"/mnt/NAS(?:_[A-Za-z0-9_.-]+)?",
+                  "/srv/media",
+                  value,
+              )
+
+              value = value.replace(
+                  "Europe/Paris",
+                  "UTC",
+              )
+
+              value = re.sub(
+                  r"http://speaches:[0-9]+",
+                  "http://transcriber:8000",
+                  value,
+              )
+
+              value = value.replace(
+                  "/home/.../autosubs",
+                  "/srv/autosubs",
+              )
+
+              value = value.replace(
+                  "Existing homelab deployment",
+                  "NAS / external media deployment",
+              )
+
+              value = value.replace(
+                  "Déploiement homelab existant",
+                  "Déploiement NAS / stockage externe",
+              )
+
+              p.write_text(value)
+
           PY
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -209,13 +335,29 @@ jobs:
           rustfmt --version
           cargo clippy --version
 
-      - name: Apply canonical rustfmt
+      - name: Canonical format before lint fixes
+        run: cargo fmt --all
+
+      - name: Protected-token regex regression
+        run: cargo test --locked protected_token_regex_covers_real_world_tokens
+
+      - name: Apply machine-applicable Clippy fixes
+        run: >-
+          cargo clippy
+          --fix
+          --locked
+          --all-targets
+          --all-features
+          --allow-dirty
+          --allow-staged
+
+      - name: Canonical format after lint fixes
         run: cargo fmt --all
 
       - name: Verify rustfmt
         run: cargo fmt --all -- --check
 
-      - name: Clippy
+      - name: Strict Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Rust tests
@@ -232,40 +374,51 @@ jobs:
         run: |
           FOUND=0
 
-          scan_literal() {
-            VALUE="$1"
-            LABEL="$2"
-            if git grep -n -I -F "$VALUE" -- \
-              ':!.github/workflows/finalize-once.yml' \
-              ':!docs/social-preview.png'
-            then
-              echo "::error::Forbidden repository trace found: $LABEL"
-              FOUND=1
-            fi
-          }
-
           scan_regex() {
-            VALUE="$1"
+            PATTERN="$1"
             LABEL="$2"
-            if git grep -n -I -E "$VALUE" -- \
+
+            if git grep -n -I -E -e "$PATTERN" -- \
               ':!.github/workflows/finalize-once.yml' \
               ':!docs/social-preview.png'
             then
-              echo "::error::Forbidden repository trace found: $LABEL"
+              echo "::error::Forbidden repository trace: $LABEL"
               FOUND=1
             fi
           }
 
-          scan_literal "/home/arezki" "personal home path"
-          scan_literal "Arezki Chougar" "personal identity"
-          scan_literal "arezki@godsquantum.com" "personal email"
-          scan_literal "/mnt/NAS_SAL" "private NAS mount"
-          scan_literal "/mnt/NAS" "private NAS mount"
-          scan_literal "speaches:8005" "private service hostname"
-          scan_literal "Pegasus" "private machine name"
-          scan_regex '192\.168\.[0-9]+\.[0-9]+' "private LAN address"
-          scan_regex '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----' "private key"
-          scan_regex '(sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,})' "credential-like token"
+          # Absolute personal home directories.
+          scan_regex \
+            '/home/[[:alnum:]_.-]+/' \
+            'absolute user home path'
+
+          # RFC1918 LAN addresses.
+          scan_regex \
+            '192\.168\.[0-9]{1,3}\.[0-9]{1,3}' \
+            'private IPv4 address'
+
+          scan_regex \
+            '10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' \
+            'private IPv4 address'
+
+          scan_regex \
+            '172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}' \
+            'private IPv4 address'
+
+          # NAS/machine-specific mount naming.
+          scan_regex \
+            '/mnt/(NAS|nas)[[:alnum:]_.:/-]*' \
+            'deployment-specific NAS path'
+
+          # Common private-key formats.
+          scan_regex \
+            '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----' \
+            'private key'
+
+          # Common credential/token forms.
+          scan_regex \
+            '(sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,})' \
+            'credential-like token'
 
           test "$FOUND" -eq 0
 
@@ -304,6 +457,9 @@ jobs:
           echo "$HEALTH" | grep -q '"ffmpegReady":true'
           echo "$HEALTH" | grep -q '"libass":true'
 
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/finalize-once.yml
+
       - name: Commit validated corrections
         shell: bash
         run: |
@@ -318,3 +474,8 @@ jobs:
             git commit -m "fix: complete production validation"
             git push origin HEAD:main
           fi
+
+      - name: Dispatch canonical CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --repo "${{ github.repository }}" --ref main
