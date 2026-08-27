@@ -1,0 +1,164 @@
+name: Finalize AutoSubs once
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autosubs-finalize-once
+  cancel-in-progress: false
+
+jobs:
+  validate-and-publish-fix:
+    name: Validate fixes
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply frontend typing regression fix
+        shell: bash
+        run: |
+          cat > frontend/src/lib/pairing.js <<'JS'
+          /** @typedef {{ name: string }} NamedFile */
+
+          const subtitleExtensions = new Set(['srt', 'ass', 'ssa', 'json']);
+
+          /** @param {string} name @returns {string} */
+          const ext = (name) => name.includes('.') ? name.split('.').pop()?.toLowerCase() ?? '' : '';
+
+          /** @param {string} name @returns {string} */
+          const stem = (name) => name.replace(/\.[^.]+$/, '');
+
+          /** @param {string} name @returns {string} */
+          const lower = (name) => name.toLowerCase();
+
+          /** @param {string} name @returns {boolean} */
+          const isInternalStaging = (name) => {
+            const value = lower(name);
+            return ext(value) === 'partial' || value.includes('.partial-') || value.endsWith('.uploading') || value.endsWith('_words.json');
+          };
+
+          /**
+           * Pair media candidates with basename-matching subtitle sidecars.
+           * @param {NamedFile[]} files
+           * @returns {Array<{ video: NamedFile, sidecar: NamedFile | undefined }>}
+           */
+          export function pairFiles(files) {
+            const candidates = files.filter((file) => !isInternalStaging(file.name));
+            /** @type {Map<string, NamedFile>} */
+            const sidecars = new Map();
+            for (const file of candidates) {
+              if (subtitleExtensions.has(ext(file.name))) sidecars.set(stem(file.name).toLowerCase(), file);
+            }
+            return candidates
+              .filter((file) => !subtitleExtensions.has(ext(file.name)))
+              .map((video) => ({ video, sidecar: sidecars.get(stem(video.name).toLowerCase()) }));
+          }
+          JS
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend regression tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Frontend TypeScript 7 / Svelte validation
+        working-directory: frontend
+        run: npm run check
+
+      - name: Frontend production build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install Rust 1.98.0
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.98.0
+          rustc --version
+          cargo --version
+          rustfmt --version
+          cargo clippy --version
+
+      - name: Apply canonical rustfmt
+        run: cargo fmt --all
+
+      - name: Verify rustfmt
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --locked --all-features
+
+      - name: Dependency audit
+        shell: bash
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit --file Cargo.lock
+
+      - name: Repository diff safety
+        run: git diff --check
+
+      - name: Build runtime container
+        run: docker build --pull -t autosubs-final .
+
+      - name: Runtime API / FFmpeg / libass smoke test
+        shell: bash
+        run: |
+          mkdir -p .ci/config .ci/data .ci/fonts .ci/media
+          chmod -R a+rwx .ci
+          docker run -d --rm --name autosubs-final \
+            -v "$PWD/.ci/config:/config" \
+            -v "$PWD/.ci/data:/data" \
+            -v "$PWD/.ci/fonts:/fonts:ro" \
+            -v "$PWD/.ci/media:/media" \
+            autosubs-final
+          trap 'docker rm -f autosubs-final >/dev/null 2>&1 || true' EXIT
+
+          HEALTH=""
+          for _ in $(seq 1 60); do
+            HEALTH="$(docker exec autosubs-final curl -fsS http://127.0.0.1:3000/api/v1/health 2>/dev/null || true)"
+            case "$HEALTH" in
+              *'"status":"ok"'*) break ;;
+            esac
+            sleep 1
+          done
+
+          printf '%s\n' "$HEALTH"
+          echo "$HEALTH" | grep -q '"status":"ok"'
+          echo "$HEALTH" | grep -q '"ffmpegReady":true'
+          echo "$HEALTH" | grep -q '"libass":true'
+
+      - name: Remove one-shot workflow
+        run: rm -f .github/workflows/finalize-once.yml
+
+      - name: Commit validated corrections
+        shell: bash
+        run: |
+          git diff --check
+          if git diff --quiet; then
+            echo "No source changes to publish."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: pass production validation"
+          git push origin HEAD:main
