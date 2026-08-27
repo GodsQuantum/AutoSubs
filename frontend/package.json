@@ -11,13 +11,13 @@
     "test": "node --test tests/*.test.mjs"
   },
   "devDependencies": {
-    "@lucide/svelte": "^0.546.0",
+    "@lucide/svelte": "^1.33.0",
     "@sveltejs/adapter-static": "3.0.10",
     "@sveltejs/kit": "2.70.3",
     "@sveltejs/vite-plugin-svelte": "7.3.0",
     "svelte": "5.56.10",
     "svelte-check": "^4.3.1",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "vite": "^8.1.0"
   }
 }
