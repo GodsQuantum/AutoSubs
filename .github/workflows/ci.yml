@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -59,8 +61,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: npm audit --audit-level=low
       - run: npm test
-      - run: npm run check
+      - run: npm run check -- --fail-on-warnings --output machine-verbose
       - run: npm run build
 
   docker:
@@ -92,3 +95,14 @@ jobs:
           echo "$HEALTH" | grep -q '"status":"ok"'
           echo "$HEALTH" | grep -q '"ffmpegReady":true'
           echo "$HEALTH" | grep -q '"libass":true'
+          INDEX_STATUS="$(docker exec autosubs-ci sh -lc 'curl -sS -o /tmp/autosubs-index -w "%{http_code}" http://127.0.0.1:3000/')"
+          test "$INDEX_STATUS" = "200"
+          docker exec autosubs-ci grep -qi 'autosubs' /tmp/autosubs-index
+
+          API_404_STATUS="$(docker exec autosubs-ci sh -lc 'curl -sS -o /tmp/autosubs-api-404 -w "%{http_code}" http://127.0.0.1:3000/api/v1/definitely-not-a-route')"
+          test "$API_404_STATUS" = "404"
+
+          if docker exec autosubs-ci grep -qi '<!doctype html' /tmp/autosubs-api-404; then
+            echo "Unknown API route incorrectly fell through to SPA"
+            false
+          fi
