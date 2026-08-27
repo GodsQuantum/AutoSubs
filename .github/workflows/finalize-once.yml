@@ -21,10 +21,24 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Apply frontend typing regression fix
+      - name: Apply audited corrections
         shell: bash
         run: |
-          cat > frontend/src/lib/pairing.js <<'JS'
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, expected=None):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if expected is not None and count != expected:
+                  raise SystemExit(f"{path}: expected {expected} occurrence(s), found {count}: {old!r}")
+              if count == 0:
+                  raise SystemExit(f"{path}: pattern not found: {old!r}")
+              p.write_text(text.replace(old, new))
+
+          # Frontend typing fix proven by the previous GitHub run.
+          Path("frontend/src/lib/pairing.js").write_text("""\
           /** @typedef {{ name: string }} NamedFile */
 
           const subtitleExtensions = new Set(['srt', 'ass', 'ssa', 'json']);
@@ -33,7 +47,7 @@ jobs:
           const ext = (name) => name.includes('.') ? name.split('.').pop()?.toLowerCase() ?? '' : '';
 
           /** @param {string} name @returns {string} */
-          const stem = (name) => name.replace(/\.[^.]+$/, '');
+          const stem = (name) => name.replace(/\\.[^.]+$/, '');
 
           /** @param {string} name @returns {string} */
           const lower = (name) => name.toLowerCase();
@@ -60,7 +74,104 @@ jobs:
               .filter((file) => !subtitleExtensions.has(ext(file.name)))
               .map((video) => ({ video, sidecar: sidecars.get(stem(video.name).toLowerCase()) }));
           }
-          JS
+          """)
+
+          # Five exact Rust failures from Actions job 98615769064.
+          replace(
+              "src/api/media.rs",
+              "HeaderMap, HeaderValue, Response, StatusCode, header",
+              "HeaderMap, Response, StatusCode, header",
+              1,
+          )
+
+          replace(
+              "src/jobs.rs",
+              "Asset, Brand, EncoderKind, FormatKey, Job, JobStatus, Preset, RawWord, SubtitleLine,",
+              "Asset, Brand, EncoderKind, Job, JobStatus, Preset, RawWord, SubtitleLine,",
+              1,
+          )
+
+          replace(
+              "src/workflows.rs",
+              "use uuid::Uuid;\n",
+              "",
+              1,
+          )
+
+          replace(
+              "src/api/settings.rs",
+              "let mut models = value",
+              "let mut models: Vec<String> = value",
+              1,
+          )
+
+          replace(
+              "src/jobs.rs",
+              "let mut published = Vec::new();",
+              "let mut published: Vec<PathBuf> = Vec::new();",
+              1,
+          )
+
+          # HTML/Svelte correctness already proven by warnings.
+          replace(
+              "frontend/src/lib/views/SettingsView.svelte",
+              "<option value={m}/>",
+              "<option value={m}></option>",
+          )
+
+          replace(
+              "frontend/src/lib/components/PathPicker.svelte",
+              '<section class="modal" role="dialog" aria-modal="true" aria-label={title || $dictionary.filePicker}>',
+              '<div class="modal" role="dialog" aria-modal="true" aria-label={title || $dictionary.filePicker}>',
+              1,
+          )
+          replace(
+              "frontend/src/lib/components/PathPicker.svelte",
+              "</section>",
+              "</div>",
+              1,
+          )
+
+          # Generic self-hosted example instead of a deployment-specific hostname.
+          replace(
+              "frontend/src/lib/views/SettingsView.svelte",
+              "http://speaches:8005/v1/audio/transcriptions",
+              "http://transcriber:8000/v1/audio/transcriptions",
+          )
+
+          # Asset MIME hardening:
+          # never trust multipart Content-Type supplied by a browser/client.
+          replace(
+              "src/api/assets.rs",
+              'let name = field.file_name().unwrap_or("asset.bin").to_owned(); let mime = field.content_type().unwrap_or("application/octet-stream").to_owned();',
+              'let name = field.file_name().unwrap_or("asset.bin").to_owned(); let mime = mime_guess::from_path(&name).first_or_octet_stream().to_string();',
+              1,
+          )
+
+          replace(
+              "src/api/assets.rs",
+              '.header(header::CACHE_CONTROL, "private, max-age=3600")',
+              '.header(header::CACHE_CONTROL, "private, max-age=3600")\n        .header("X-Content-Type-Options", "nosniff")',
+              1,
+          )
+
+          # Generalise known infrastructure examples wherever present.
+          for path in [
+              ".env.example",
+              "compose.example.yaml",
+              "README.md",
+              "README.fr.md",
+          ]:
+              p = Path(path)
+              if not p.exists():
+                  continue
+              text = p.read_text()
+              text = text.replace("Europe/Paris", "UTC")
+              text = text.replace("/mnt/NAS_SAL", "/srv/media")
+              text = text.replace("/mnt/NAS", "/srv/media")
+              text = text.replace("speaches:8005", "transcriber:8000")
+              p.write_text(text)
+          PY
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -72,11 +183,15 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Frontend dependency audit
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
       - name: Frontend regression tests
         working-directory: frontend
         run: npm test
 
-      - name: Frontend TypeScript 7 / Svelte validation
+      - name: Frontend TypeScript / Svelte validation
         working-directory: frontend
         run: npm run check
 
@@ -112,6 +227,48 @@ jobs:
           cargo install cargo-audit --version 0.22.2 --locked
           cargo audit --file Cargo.lock
 
+      - name: Current-tree privacy and secret scan
+        shell: bash
+        run: |
+          FOUND=0
+
+          scan_literal() {
+            VALUE="$1"
+            LABEL="$2"
+            if git grep -n -I -F "$VALUE" -- \
+              ':!.github/workflows/finalize-once.yml' \
+              ':!docs/social-preview.png'
+            then
+              echo "::error::Forbidden repository trace found: $LABEL"
+              FOUND=1
+            fi
+          }
+
+          scan_regex() {
+            VALUE="$1"
+            LABEL="$2"
+            if git grep -n -I -E "$VALUE" -- \
+              ':!.github/workflows/finalize-once.yml' \
+              ':!docs/social-preview.png'
+            then
+              echo "::error::Forbidden repository trace found: $LABEL"
+              FOUND=1
+            fi
+          }
+
+          scan_literal "/home/arezki" "personal home path"
+          scan_literal "Arezki Chougar" "personal identity"
+          scan_literal "arezki@godsquantum.com" "personal email"
+          scan_literal "/mnt/NAS_SAL" "private NAS mount"
+          scan_literal "/mnt/NAS" "private NAS mount"
+          scan_literal "speaches:8005" "private service hostname"
+          scan_literal "Pegasus" "private machine name"
+          scan_regex '192\.168\.[0-9]+\.[0-9]+' "private LAN address"
+          scan_regex '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----' "private key"
+          scan_regex '(sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,})' "credential-like token"
+
+          test "$FOUND" -eq 0
+
       - name: Repository diff safety
         run: git diff --check
 
@@ -123,12 +280,14 @@ jobs:
         run: |
           mkdir -p .ci/config .ci/data .ci/fonts .ci/media
           chmod -R a+rwx .ci
+
           docker run -d --rm --name autosubs-final \
             -v "$PWD/.ci/config:/config" \
             -v "$PWD/.ci/data:/data" \
             -v "$PWD/.ci/fonts:/fonts:ro" \
             -v "$PWD/.ci/media:/media" \
             autosubs-final
+
           trap 'docker rm -f autosubs-final >/dev/null 2>&1 || true' EXIT
 
           HEALTH=""
@@ -145,20 +304,17 @@ jobs:
           echo "$HEALTH" | grep -q '"ffmpegReady":true'
           echo "$HEALTH" | grep -q '"libass":true'
 
-      - name: Remove one-shot workflow
-        run: rm -f .github/workflows/finalize-once.yml
-
       - name: Commit validated corrections
         shell: bash
         run: |
           git diff --check
+
           if git diff --quiet; then
             echo "No source changes to publish."
-            exit 0
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "fix: complete production validation"
+            git push origin HEAD:main
           fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "fix: pass production validation"
-          git push origin HEAD:main
