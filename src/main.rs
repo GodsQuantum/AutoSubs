@@ -1,5 +1,5 @@
 use autosubs::{api, config::Config, media::detect_encoder_capabilities, state::AppState, workflows};
-use axum::Router;
+use axum::{http::StatusCode, routing::any, Router};
 use clap::Parser;
 use tokio_util::sync::CancellationToken;
 use tower_http::{services::{ServeDir, ServeFile}, trace::TraceLayer};
@@ -23,6 +23,10 @@ async fn main() -> anyhow::Result<()> {
 
     let mut app = Router::new()
         .merge(api::router())
+        // API paths must never fall through to the SPA index.
+        .route("/api", any(api_not_found))
+        .route("/api/", any(api_not_found))
+        .route("/api/{*path}", any(api_not_found))
         .nest_service("/fonts", ServeDir::new(&state.config.fonts_dir))
         .layer(TraceLayer::new_for_http());
     if state.config.dist_dir.is_dir() {
@@ -35,6 +39,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(%address, "AutoSubs started");
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal(shutdown)).await?;
     Ok(())
+}
+
+async fn api_not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
 }
 
 async fn shutdown_signal(token: CancellationToken) {
