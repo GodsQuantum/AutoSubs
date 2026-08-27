@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, subtitleExportUrl, videoUrl } from '$lib/api';
   import { dictionary } from '$lib/i18n';
+  import { subtitlesToVtt } from '$lib/captions.js';
   import type { FormatKey, FitMode, Job, Preset, SubtitleLine } from '$lib/types';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import PathPicker from '$lib/components/PathPicker.svelte';
@@ -27,12 +28,14 @@
   let customHeight=1920;
   let sidecarPicker=false;
   let fileInput:HTMLInputElement;
+  let captionTrackUrl='';
   let report:{repairedLineOverlaps:number;retimedWordLines:number;droppedEmptyLines:number}|undefined;
 
   $: if(job && job.id!==loadedId){ loadedId=job.id; hydrate(job); }
   $: locked = job ? ['pending','uploading','probing','transcribing','correcting','rendering'].includes(job.status) : true;
   $: activeLine = lines.findIndex(l=>currentTime>=l.start&&currentTime<l.end);
   $: currentPreset = presets.find(p=>p.id===selectedPreset);
+  $: captionTrackUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(subtitlesToVtt(lines))}`;
 
   function hydrate(j:Job){
     lines=(j.lines??[]).map(l=>({...l,words:l.words?.map(w=>({...w}))})); dirty=false; report=undefined;
@@ -64,16 +67,16 @@
     <div class="editor-layout">
       <div class="editor-left">
         <div class="video-stage">
-          <video id="autosubs-editor-video" src={videoUrl(job.id)} controls preload="metadata" playsinline on:timeupdate={(e)=>currentTime=(e.currentTarget as HTMLVideoElement).currentTime}></video>
+          <video id="autosubs-editor-video" src={videoUrl(job.id)} controls preload="metadata" playsinline on:timeupdate={(e)=>currentTime=(e.currentTarget as HTMLVideoElement).currentTime}><track kind="captions" src={captionTrackUrl} srclang="und" label={$dictionary.subtitles}></video>
         </div>
         <section class="card">
           <div class="card-header"><strong>{$dictionary.subtitles}</strong><span class="muted small">{lines.length} · {currentTime.toFixed(2)}s</span></div>
           <div class="card-body">
             <div class="subtitle-toolbar">
-              <div class="field" style="flex:1"><label>{$dictionary.search}</label><input class="input" bind:value={search}/></div>
-              <div class="field" style="flex:1"><label>{$dictionary.replace}</label><input class="input" bind:value={replace}/></div>
+              <div class="field" style="flex:1"><label for="editor-field-1">{$dictionary.search}</label><input id="editor-field-1" class="input" bind:value={search}/></div>
+              <div class="field" style="flex:1"><label for="editor-field-2">{$dictionary.replace}</label><input id="editor-field-2" class="input" bind:value={replace}/></div>
               <button class="btn" disabled={locked||!search} on:click={replaceText}>{$dictionary.replaceAll}</button>
-              <div class="field" style="width:105px"><label>{$dictionary.shift}</label><input class="input" type="number" bind:value={shiftMs}/></div>
+              <div class="field" style="width:105px"><label for="editor-field-3">{$dictionary.shift}</label><input id="editor-field-3" class="input" type="number" bind:value={shiftMs}/></div>
               <button class="btn" disabled={locked} on:click={shiftAll}>± {$dictionary.milliseconds}</button>
             </div>
             {#if locked}<div class="help" style="margin-top:9px;color:var(--warning)">{$dictionary.activeJobLocked}</div>{/if}
@@ -95,12 +98,12 @@
         <section class="card">
           <div class="card-header"><strong>{$dictionary.outputSection}</strong></div>
           <div class="card-body stack">
-            <div class="field"><label>{$dictionary.preset}</label><select class="select" bind:value={selectedPreset} disabled={locked}><option value="">{$dictionary.none}</option>{#each presets as p}<option value={p.id}>{p.name}</option>{/each}</select></div>
+            <div class="field"><label for="editor-field-4">{$dictionary.preset}</label><select id="editor-field-4" class="select" bind:value={selectedPreset} disabled={locked}><option value="">{$dictionary.none}</option>{#each presets as p}<option value={p.id}>{p.name}</option>{/each}</select></div>
             <div class="grid two">
-              <div class="field"><label>{$dictionary.format}</label><select class="select" bind:value={formatKey} disabled={locked}><option value="source">{$dictionary.sourceFormat}</option><option value="portrait916">9:16</option><option value="landscape169">16:9</option><option value="square11">1:1</option><option value="portrait45">4:5</option><option value="custom">{$dictionary.custom}</option></select></div>
-              <div class="field"><label>{$dictionary.fit}</label><select class="select" bind:value={fit} disabled={locked||formatKey==='source'}><option value="contain">{$dictionary.contain}</option><option value="cover">{$dictionary.cover}</option><option value="stretch">{$dictionary.stretch}</option></select></div>
+              <div class="field"><label for="editor-field-5">{$dictionary.format}</label><select id="editor-field-5" class="select" bind:value={formatKey} disabled={locked}><option value="source">{$dictionary.sourceFormat}</option><option value="portrait916">9:16</option><option value="landscape169">16:9</option><option value="square11">1:1</option><option value="portrait45">4:5</option><option value="custom">{$dictionary.custom}</option></select></div>
+              <div class="field"><label for="editor-field-6">{$dictionary.fit}</label><select id="editor-field-6" class="select" bind:value={fit} disabled={locked||formatKey==='source'}><option value="contain">{$dictionary.contain}</option><option value="cover">{$dictionary.cover}</option><option value="stretch">{$dictionary.stretch}</option></select></div>
             </div>
-            {#if formatKey==='custom'}<div class="grid two"><div class="field"><label>{$dictionary.width}</label><input class="input" type="number" bind:value={customWidth}/></div><div class="field"><label>{$dictionary.height}</label><input class="input" type="number" bind:value={customHeight}/></div></div>{/if}
+            {#if formatKey==='custom'}<div class="grid two"><div class="field"><label for="editor-field-7">{$dictionary.width}</label><input id="editor-field-7" class="input" type="number" bind:value={customWidth}/></div><div class="field"><label for="editor-field-8">{$dictionary.height}</label><input id="editor-field-8" class="input" type="number" bind:value={customHeight}/></div></div>{/if}
             <div class="help">{$dictionary.sourcePreserveHint}</div>
             <button class="btn" disabled={locked} on:click={applyJob}>{$dictionary.applyToJob}</button>
           </div>
@@ -109,7 +112,7 @@
         <section class="card">
           <div class="card-header"><strong>{$dictionary.segmentation}</strong></div>
           <div class="card-body stack">
-            <div class="grid two"><div class="field"><label>{$dictionary.maxChars}</label><input class="input" type="number" min="5" bind:value={maxChars}/></div><div class="field"><label>{$dictionary.maxLines}</label><input class="input" type="number" min="1" max="4" bind:value={maxLines}/></div></div>
+            <div class="grid two"><div class="field"><label for="editor-field-9">{$dictionary.maxChars}</label><input id="editor-field-9" class="input" type="number" min="5" bind:value={maxChars}/></div><div class="field"><label for="editor-field-10">{$dictionary.maxLines}</label><input id="editor-field-10" class="input" type="number" min="1" max="4" bind:value={maxLines}/></div></div>
             <button class="btn" disabled={locked||!lines.length} on:click={regroup}>✦ {$dictionary.regroup}</button>
             <div class="help">{$dictionary.timingRepairHint}</div>
             {#if report}<div class="resource-meta"><span class="chip">{$dictionary.repairedOverlaps}: {report.repairedLineOverlaps}</span><span class="chip">{$dictionary.retimedLines}: {report.retimedWordLines}</span><span class="chip">{$dictionary.droppedEmpty}: {report.droppedEmptyLines}</span></div>{/if}

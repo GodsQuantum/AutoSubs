@@ -86,10 +86,10 @@ A typical layout is:
 /config             local SSD / host filesystem — SQLite only
 /data               local or fast app working data — uploads/jobs/renders
 /fonts              custom fonts, read-only is fine
-/mnt/NAS/...        large source/output/archive trees
+/srv/media/...        large source/output/archive trees
 ```
 
-## Existing homelab deployment
+## NAS / external media deployment
 
 If your media already lives on a NAS, mount the NAS once and expose only the roots AutoSubs is allowed to browse:
 
@@ -104,20 +104,20 @@ services:
     ports:
       - "3051:3000"
     environment:
-      TZ: Europe/Paris
+      TZ: UTC
       AUTOSUBS_CONFIG_DIR: /config
       AUTOSUBS_DATA_DIR: /data
       AUTOSUBS_FONTS_DIR: /fonts
-      AUTOSUBS_ALLOWED_ROOTS: /data:/mnt/NAS
+      AUTOSUBS_ALLOWED_ROOTS: /data:/srv/media
       AUTOSUBS_MAX_RENDER_JOBS: "2"
       AUTOSUBS_MAX_TRANSCRIPTION_JOBS: "2"
       AUTOSUBS_LOCAL_TRANSCRIPTION_ENABLED: "true"
-      AUTOSUBS_LOCAL_TRANSCRIPTION_URL: http://speaches:8005/v1/audio/transcriptions
+      AUTOSUBS_LOCAL_TRANSCRIPTION_URL: http://transcriber:8000/v1/audio/transcriptions
     volumes:
       - ./config:/config
       - ./data:/data
       - ./fonts:/fonts:ro
-      - /mnt/NAS:/mnt/NAS
+      - /srv/media:/srv/media
 ```
 
 Provider environment variables **bootstrap an empty database only**. After first start, Settings in the UI are authoritative. That avoids a container restart unexpectedly overwriting a key/URL you changed from the UI.

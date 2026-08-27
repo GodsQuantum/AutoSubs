@@ -1,24 +1,27 @@
 use crate::domain::{RawWord, SubtitleLine, SubtitleWord, TranscriptionResponse};
-use crate::subtitle::normalize::{normalize_subtitles, NormalizeOptions};
+use crate::subtitle::normalize::{NormalizeOptions, normalize_subtitles};
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use unicode_linebreak::{linebreaks, BreakOpportunity};
+use unicode_linebreak::{BreakOpportunity, linebreaks};
 use unicode_segmentation::UnicodeSegmentation;
 
 static PROTECTED_TOKEN_RE: OnceLock<Regex> = OnceLock::new();
 static ABBREVIATION_RE: OnceLock<Regex> = OnceLock::new();
 
+type LayoutMemo = HashMap<(usize, usize), Option<(f64, Vec<usize>)>>;
+
 fn protected_token_re() -> &'static Regex {
     PROTECTED_TOKEN_RE.get_or_init(|| Regex::new(
-        r"(?xi)^(?:https?://\S+|www\.\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|[@#][\p{L}\p{N}_]+|\d+(?:[.,:/-]\d+)+|[\p{L}]+(?:['’][\p{L}]+)+)$"
+        r"(?i)^(?:https?://\S+|www\.\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|[@#][\p{L}\p{N}_]+|\d+(?:[.,:/-]\d+)+|[\p{L}]+(?:['’][\p{L}]+)+)$"
     ).expect("valid protected token regex"))
 }
 
 fn abbreviation_re() -> &'static Regex {
-    ABBREVIATION_RE.get_or_init(|| Regex::new(
-        r"(?xi)^(?:m|mme|mlle|dr|pr|etc|ex|env|approx|st|ste|vs|cf|n°|no)\.$"
-    ).expect("valid abbreviation regex"))
+    ABBREVIATION_RE.get_or_init(|| {
+        Regex::new(r"(?xi)^(?:m|mme|mlle|dr|pr|etc|ex|env|approx|st|ste|vs|cf|n°|no)\.$")
+            .expect("valid abbreviation regex")
+    })
 }
 
 pub fn grapheme_len(text: &str) -> usize {
@@ -27,55 +30,99 @@ pub fn grapheme_len(text: &str) -> usize {
 
 fn cleaned_word(word: &str) -> String {
     word.trim()
-        .trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '!' | '?' | '.' | '…' | '(' | ')' | '[' | ']' | '"' | '«' | '»'))
+        .trim_matches(|c: char| {
+            matches!(
+                c,
+                ',' | ';' | ':' | '!' | '?' | '.' | '…' | '(' | ')' | '[' | ']' | '"' | '«' | '»'
+            )
+        })
         .to_lowercase()
 }
 
 fn pair_is_bound(left: &str, right: &str) -> bool {
     let l = cleaned_word(left);
     let r = cleaned_word(right);
-    if l.is_empty() || r.is_empty() { return false; }
+    if l.is_empty() || r.is_empty() {
+        return false;
+    }
 
-    if left.trim_end().ends_with(['\'', '’']) || right.trim_start().starts_with(['\'', '’']) { return true; }
+    if left.trim_end().ends_with(['\'', '’']) || right.trim_start().starts_with(['\'', '’']) {
+        return true;
+    }
     if protected_token_re().is_match(left.trim()) || protected_token_re().is_match(right.trim()) {
         return left.contains("http") || right.contains("http");
     }
 
     const FORWARD: &[&str] = &[
-        "le","la","les","l","un","une","des","du","de","d","au","aux",
-        "à","en","pour","sur","sous","dans","par","avec","sans","chez","vers",
-        "je","j","tu","il","elle","on","nous","vous","ils","elles",
-        "me","m","te","t","se","s","lui","leur","y",
-        "ce","cet","cette","ces","c","mon","ton","son","ma","ta","sa","mes","tes","ses","notre","votre","nos","vos","leurs",
-        "ne","n","très","trop","plus","moins","bien","si",
-        "qui","que","qu","quoi","dont","où","quand","comment","pourquoi",
-        "et","ou","mais","donc","or","ni","car","parce","tandis","jusqu","jusque","afin","tel","telle","tels","telles",
-        "quel","quelle","quels","quelles","avant","alors","ainsi"
+        "le", "la", "les", "l", "un", "une", "des", "du", "de", "d", "au", "aux", "à", "en",
+        "pour", "sur", "sous", "dans", "par", "avec", "sans", "chez", "vers", "je", "j", "tu",
+        "il", "elle", "on", "nous", "vous", "ils", "elles", "me", "m", "te", "t", "se", "s", "lui",
+        "leur", "y", "ce", "cet", "cette", "ces", "c", "mon", "ton", "son", "ma", "ta", "sa",
+        "mes", "tes", "ses", "notre", "votre", "nos", "vos", "leurs", "ne", "n", "très", "trop",
+        "plus", "moins", "bien", "si", "qui", "que", "qu", "quoi", "dont", "où", "quand",
+        "comment", "pourquoi", "et", "ou", "mais", "donc", "or", "ni", "car", "parce", "tandis",
+        "jusqu", "jusque", "afin", "tel", "telle", "tels", "telles", "quel", "quelle", "quels",
+        "quelles", "avant", "alors", "ainsi",
     ];
-    const BACKWARD: &[&str] = &["pas","plus","jamais","rien","personne"];
-    if FORWARD.contains(&l.as_str()) || BACKWARD.contains(&r.as_str()) { return true; }
+    const BACKWARD: &[&str] = &["pas", "plus", "jamais", "rien", "personne"];
+    if FORWARD.contains(&l.as_str()) || BACKWARD.contains(&r.as_str()) {
+        return true;
+    }
 
-    matches!((l.as_str(), r.as_str()),
-        ("parce", "que") | ("bien", "que") | ("alors", "que") | ("ainsi", "que") |
-        ("avant", "de") | ("afin", "de") | ("tel", "que") | ("telle", "que") |
-        ("tels", "que") | ("telles", "que") | ("y", "a") | ("il", "y")
+    matches!(
+        (l.as_str(), r.as_str()),
+        ("parce", "que")
+            | ("bien", "que")
+            | ("alors", "que")
+            | ("ainsi", "que")
+            | ("avant", "de")
+            | ("afin", "de")
+            | ("tel", "que")
+            | ("telle", "que")
+            | ("tels", "que")
+            | ("telles", "que")
+            | ("y", "a")
+            | ("il", "y")
     )
 }
 
 fn unicode_allows_boundary(left: &str, right: &str) -> bool {
     let sample = format!("{} {}", left.trim(), right.trim());
     let boundary = left.trim().len() + 1;
-    linebreaks(&sample).any(|(idx, opportunity)| idx == boundary && matches!(opportunity, BreakOpportunity::Allowed | BreakOpportunity::Mandatory))
+    linebreaks(&sample).any(|(idx, opportunity)| {
+        idx == boundary
+            && matches!(
+                opportunity,
+                BreakOpportunity::Allowed | BreakOpportunity::Mandatory
+            )
+    })
 }
 
 fn boundary_penalty(left: &str, right: &str) -> f64 {
-    if pair_is_bound(left, right) { return 10_000.0; }
-    if !unicode_allows_boundary(left, right) { return 5_000.0; }
-    if right.trim_start().starts_with([',', '.', ';', ':', '!', '?', '…', ')', ']', '»']) { return 10_000.0; }
-    if left.trim_end().ends_with(['(', '[', '«']) { return 10_000.0; }
-    if abbreviation_re().is_match(left.trim()) { return 500.0; }
-    if left.trim_end().ends_with(['.', '!', '?', '…']) { return -120.0; }
-    if left.trim_end().ends_with([',', ';', ':']) { return -45.0; }
+    if pair_is_bound(left, right) {
+        return 10_000.0;
+    }
+    if !unicode_allows_boundary(left, right) {
+        return 5_000.0;
+    }
+    if right
+        .trim_start()
+        .starts_with([',', '.', ';', ':', '!', '?', '…', ')', ']', '»'])
+    {
+        return 10_000.0;
+    }
+    if left.trim_end().ends_with(['(', '[', '«']) {
+        return 10_000.0;
+    }
+    if abbreviation_re().is_match(left.trim()) {
+        return 500.0;
+    }
+    if left.trim_end().ends_with(['.', '!', '?', '…']) {
+        return -120.0;
+    }
+    if left.trim_end().ends_with([',', ';', ':']) {
+        return -45.0;
+    }
     0.0
 }
 
@@ -101,37 +148,52 @@ fn raw_words(transcription: &TranscriptionResponse) -> Vec<SubtitleWord> {
     if let Some(words) = &transcription.words {
         append_raw_words(&mut result, words);
     }
-    if result.is_empty() {
-        if let Some(segments) = &transcription.segments {
-            for segment in segments {
-                if let Some(words) = &segment.words {
-                    append_raw_words(&mut result, words);
+    if result.is_empty()
+        && let Some(segments) = &transcription.segments
+    {
+        for segment in segments {
+            if let Some(words) = &segment.words {
+                append_raw_words(&mut result, words);
+                continue;
+            }
+            if let Some(text) = &segment.text {
+                let tokens: Vec<&str> = text.split_whitespace().collect();
+                if tokens.is_empty() {
                     continue;
                 }
-                if let Some(text) = &segment.text {
-                    let tokens: Vec<&str> = text.split_whitespace().collect();
-                    if tokens.is_empty() { continue; }
-                    let start = segment.start.unwrap_or(0.0).max(0.0);
-                    let end = segment.end.unwrap_or(start + 1.0).max(start + 0.1);
-                    let total: usize = tokens.iter().map(|v| grapheme_len(v).max(1)).sum();
-                    let mut cursor = start;
-                    for (idx, token) in tokens.iter().enumerate() {
-                        let duration = (end - start) * (grapheme_len(token).max(1) as f64 / total as f64);
-                        let token_end = if idx == tokens.len() - 1 { end } else { cursor + duration };
-                        result.push(SubtitleWord { word: (*token).into(), start: cursor, end: token_end });
-                        cursor = token_end;
-                    }
+                let start = segment.start.unwrap_or(0.0).max(0.0);
+                let end = segment.end.unwrap_or(start + 1.0).max(start + 0.1);
+                let total: usize = tokens.iter().map(|v| grapheme_len(v).max(1)).sum();
+                let mut cursor = start;
+                for (idx, token) in tokens.iter().enumerate() {
+                    let duration =
+                        (end - start) * (grapheme_len(token).max(1) as f64 / total as f64);
+                    let token_end = if idx == tokens.len() - 1 {
+                        end
+                    } else {
+                        cursor + duration
+                    };
+                    result.push(SubtitleWord {
+                        word: (*token).into(),
+                        start: cursor,
+                        end: token_end,
+                    });
+                    cursor = token_end;
                 }
             }
         }
     }
-    if result.is_empty() {
-        if let Some(text) = &transcription.text {
-            let mut cursor = 0.0;
-            for token in text.split_whitespace() {
-                result.push(SubtitleWord { word: token.into(), start: cursor, end: cursor + 0.4 });
-                cursor += 0.4;
-            }
+    if result.is_empty()
+        && let Some(text) = &transcription.text
+    {
+        let mut cursor = 0.0;
+        for token in text.split_whitespace() {
+            result.push(SubtitleWord {
+                word: token.into(),
+                start: cursor,
+                end: cursor + 0.4,
+            });
+            cursor += 0.4;
         }
     }
     fix_tokenization(result)
@@ -140,16 +202,28 @@ fn raw_words(transcription: &TranscriptionResponse) -> Vec<SubtitleWord> {
 fn append_raw_words(out: &mut Vec<SubtitleWord>, words: &[RawWord]) {
     for word in words {
         let text = word.word.as_deref().unwrap_or("").trim();
-        if text.is_empty() { continue; }
+        if text.is_empty() {
+            continue;
+        }
         let start = word.start.unwrap_or(0.0).max(0.0);
         let end = word.end.unwrap_or(start + 0.04).max(start + 0.02);
-        out.push(SubtitleWord { word: text.into(), start, end });
+        out.push(SubtitleWord {
+            word: text.into(),
+            start,
+            end,
+        });
     }
 }
 
 fn segment_text_len(words: &[SubtitleWord]) -> usize {
-    if words.is_empty() { return 0; }
-    words.iter().map(|w| grapheme_len(w.word.trim())).sum::<usize>() + words.len().saturating_sub(1)
+    if words.is_empty() {
+        return 0;
+    }
+    words
+        .iter()
+        .map(|w| grapheme_len(w.word.trim()))
+        .sum::<usize>()
+        + words.len().saturating_sub(1)
 }
 
 fn line_cost(words: &[SubtitleWord], max_chars: usize, is_final_line: bool) -> f64 {
@@ -157,32 +231,49 @@ fn line_cost(words: &[SubtitleWord], max_chars: usize, is_final_line: bool) -> f
     let max = max_chars.max(1) as f64;
     let overflow = (len - max).max(0.0);
     let under = (max - len).max(0.0);
-    let mut cost = overflow * overflow * 120.0 + under * under * if is_final_line { 0.10 } else { 0.35 };
-    if len < max * 0.32 && !is_final_line { cost += 120.0; }
+    let mut cost =
+        overflow * overflow * 120.0 + under * under * if is_final_line { 0.10 } else { 0.35 };
+    if len < max * 0.32 && !is_final_line {
+        cost += 120.0;
+    }
     cost
 }
 
 fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Vec<usize> {
     fn solve(
-        words: &[SubtitleWord], start: usize, remaining: usize, max_chars: usize,
-        memo: &mut HashMap<(usize, usize), Option<(f64, Vec<usize>)>>,
+        words: &[SubtitleWord],
+        start: usize,
+        remaining: usize,
+        max_chars: usize,
+        memo: &mut LayoutMemo,
     ) -> Option<(f64, Vec<usize>)> {
-        if start == words.len() { return Some((0.0, Vec::new())); }
-        if remaining == 0 { return None; }
-        if let Some(cached) = memo.get(&(start, remaining)) { return cached.clone(); }
+        if start == words.len() {
+            return Some((0.0, Vec::new()));
+        }
+        if remaining == 0 {
+            return None;
+        }
+        if let Some(cached) = memo.get(&(start, remaining)) {
+            return cached.clone();
+        }
 
         let mut best: Option<(f64, Vec<usize>)> = None;
         for end in start + 1..=words.len() {
             let words_left = words.len() - end;
-            if remaining == 1 && words_left > 0 { continue; }
-            if words_left > 0 && remaining <= 1 { continue; }
+            if remaining == 1 && words_left > 0 {
+                continue;
+            }
+            if words_left > 0 && remaining <= 1 {
+                continue;
+            }
 
             let segment = &words[start..end];
             let mut cost = line_cost(segment, max_chars, end == words.len());
             if end < words.len() {
                 cost += boundary_penalty(&words[end - 1].word, &words[end].word);
             }
-            if let Some((rest_cost, mut breaks)) = solve(words, end, remaining - 1, max_chars, memo) {
+            if let Some((rest_cost, mut breaks)) = solve(words, end, remaining - 1, max_chars, memo)
+            {
                 cost += rest_cost;
                 let mut candidate = vec![end];
                 candidate.append(&mut breaks);
@@ -206,12 +297,26 @@ fn make_block(words: &[SubtitleWord], id: u32, max_chars: usize, max_lines: usiz
     let mut text_lines = Vec::new();
     let mut start_idx = 0;
     for end_idx in breaks {
-        if end_idx <= start_idx || end_idx > words.len() { continue; }
-        text_lines.push(words[start_idx..end_idx].iter().map(|w| w.word.trim()).collect::<Vec<_>>().join(" "));
+        if end_idx <= start_idx || end_idx > words.len() {
+            continue;
+        }
+        text_lines.push(
+            words[start_idx..end_idx]
+                .iter()
+                .map(|w| w.word.trim())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
         start_idx = end_idx;
     }
     if start_idx < words.len() {
-        text_lines.push(words[start_idx..].iter().map(|w| w.word.trim()).collect::<Vec<_>>().join(" "));
+        text_lines.push(
+            words[start_idx..]
+                .iter()
+                .map(|w| w.word.trim())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
     }
     SubtitleLine {
         id,
@@ -222,9 +327,15 @@ fn make_block(words: &[SubtitleWord], id: u32, max_chars: usize, max_lines: usiz
     }
 }
 
-pub fn group_transcription_into_lines(transcription: &TranscriptionResponse, max_chars: u32, max_lines: u32) -> Vec<SubtitleLine> {
+pub fn group_transcription_into_lines(
+    transcription: &TranscriptionResponse,
+    max_chars: u32,
+    max_lines: u32,
+) -> Vec<SubtitleLine> {
     let words = raw_words(transcription);
-    if words.is_empty() { return Vec::new(); }
+    if words.is_empty() {
+        return Vec::new();
+    }
     let max_chars = max_chars.max(4) as usize;
     let max_lines = max_lines.clamp(1, 4) as usize;
     let target_block = max_chars * max_lines;
@@ -235,7 +346,11 @@ pub fn group_transcription_into_lines(transcription: &TranscriptionResponse, max
     let mut id = 0u32;
 
     for word in words {
-        let prospective_len = if current.is_empty() { grapheme_len(&word.word) } else { segment_text_len(&current) + 1 + grapheme_len(&word.word) };
+        let prospective_len = if current.is_empty() {
+            grapheme_len(&word.word)
+        } else {
+            segment_text_len(&current) + 1 + grapheme_len(&word.word)
+        };
         if !current.is_empty() && prospective_len > hard_block {
             let prev = current.last().unwrap();
             if !pair_is_bound(&prev.word, &word.word) {
@@ -245,17 +360,26 @@ pub fn group_transcription_into_lines(transcription: &TranscriptionResponse, max
             }
         }
 
-        let sentence_end = word.word.trim_end().ends_with(['.', '!', '?', '…']) && !abbreviation_re().is_match(word.word.trim());
+        let sentence_end = word.word.trim_end().ends_with(['.', '!', '?', '…'])
+            && !abbreviation_re().is_match(word.word.trim());
         current.push(word);
         let current_len = segment_text_len(&current);
-        if sentence_end || (current_len >= target_block && current.len() > 1 && current.last().is_some_and(|last| last.word.ends_with([',', ';', ':']))) {
+        if sentence_end
+            || (current_len >= target_block
+                && current.len() > 1
+                && current
+                    .last()
+                    .is_some_and(|last| last.word.ends_with([',', ';', ':'])))
+        {
             blocks.push(make_block(&current, id, max_chars, max_lines));
             id += 1;
             current.clear();
         }
     }
 
-    if !current.is_empty() { blocks.push(make_block(&current, id, max_chars, max_lines)); }
+    if !current.is_empty() {
+        blocks.push(make_block(&current, id, max_chars, max_lines));
+    }
     normalize_subtitles(&blocks, NormalizeOptions::default()).lines
 }
 
@@ -267,9 +391,16 @@ mod tests {
         TranscriptionResponse {
             text: None,
             segments: None,
-            words: Some(words.iter().map(|(word, start, end)| RawWord {
-                word: Some((*word).into()), start: Some(*start), end: Some(*end)
-            }).collect()),
+            words: Some(
+                words
+                    .iter()
+                    .map(|(word, start, end)| RawWord {
+                        word: Some((*word).into()),
+                        start: Some(*start),
+                        end: Some(*end),
+                    })
+                    .collect(),
+            ),
         }
     }
 
@@ -281,21 +412,43 @@ mod tests {
 
     #[test]
     fn protected_token_regex_covers_real_world_tokens() {
-        for token in ["https://example.com/a-b", "test@example.com", "@creator", "#AutoSubs", "3.14", "l'homme"] {
-            assert!(protected_token_re().is_match(token), "not protected: {token}");
+        for token in [
+            "https://example.com/a-b",
+            "test@example.com",
+            "@creator",
+            "#AutoSubs",
+            "3.14",
+            "l'homme",
+        ] {
+            assert!(
+                protected_token_re().is_match(token),
+                "not protected: {token}"
+            );
         }
     }
 
     #[test]
     fn french_connectors_are_strong_no_break_pairs() {
-        for (left, right) in [("avant","de"),("afin","de"),("parce","que"),("bien","que"),("alors","que"),("ainsi","que"),("tel","que"),("y","a")] {
-            assert!(boundary_penalty(left, right) >= 5_000.0, "{left} {right} was breakable");
+        for (left, right) in [
+            ("avant", "de"),
+            ("afin", "de"),
+            ("parce", "que"),
+            ("bien", "que"),
+            ("alors", "que"),
+            ("ainsi", "que"),
+            ("tel", "que"),
+            ("y", "a"),
+        ] {
+            assert!(
+                boundary_penalty(left, right) >= 5_000.0,
+                "{left} {right} was breakable"
+            );
         }
     }
 
     #[test]
     fn apostrophe_tokens_merge_before_layout() {
-        let input = transcription(&[("l'",0.0,0.1),("homme",0.1,0.4),("arrive",0.4,0.8)]);
+        let input = transcription(&[("l'", 0.0, 0.1), ("homme", 0.1, 0.4), ("arrive", 0.4, 0.8)]);
         let lines = group_transcription_into_lines(&input, 8, 2);
         assert!(lines.iter().any(|line| line.text.contains("l'homme")));
     }
@@ -303,9 +456,18 @@ mod tests {
     #[test]
     fn balanced_layout_avoids_breaking_avant_de() {
         let input = transcription(&[
-            ("Je",0.0,0.1),("pars",0.1,0.2),("avant",0.2,0.4),("de",0.4,0.5),("manger",0.5,0.8),("ici.",0.8,1.0)
+            ("Je", 0.0, 0.1),
+            ("pars", 0.1, 0.2),
+            ("avant", 0.2, 0.4),
+            ("de", 0.4, 0.5),
+            ("manger", 0.5, 0.8),
+            ("ici.", 0.8, 1.0),
         ]);
         let lines = group_transcription_into_lines(&input, 10, 2);
-        assert!(lines.iter().all(|line| !line.text.contains("avant\nde")), "{:?}", lines);
+        assert!(
+            lines.iter().all(|line| !line.text.contains("avant\nde")),
+            "{:?}",
+            lines
+        );
     }
 }

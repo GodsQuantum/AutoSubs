@@ -84,7 +84,7 @@ Ouvre `http://<ip-du-serveur>:3051`.
 /config             SSD / filesystem local — SQLite uniquement
 /data               données de travail — uploads/jobs/renders
 /fonts              polices custom, lecture seule possible
-/mnt/NAS/...        sources/sorties/archives volumineuses
+/srv/media/...        sources/sorties/archives volumineuses
 ```
 
 ## Migration d'un ancien déploiement
@@ -101,14 +101,14 @@ SPEACHES_URL     → AUTOSUBS_LOCAL_TRANSCRIPTION_URL
 
 `SPEACHES_URL` reste accepté comme alias de migration au **premier démarrage d'une DB vide**. Les variables provider servent uniquement à initialiser la DB ; ensuite les valeurs enregistrées depuis Settings deviennent la référence.
 
-Un montage ancien du type `/home/.../autosubs/data:/app/data` doit être séparé :
+Un montage ancien du type `/srv/autosubs/data:/app/data` doit être séparé :
 
 ```yaml
 volumes:
-  - /home/.../autosubs/config:/config
-  - /home/.../autosubs/data:/data
-  - /home/.../autosubs/fonts:/fonts:ro
-  - /mnt/NAS:/mnt/NAS
+  - /srv/autosubs/config:/config
+  - /srv/autosubs/data:/data
+  - /srv/autosubs/fonts:/fonts:ro
+  - /srv/media:/srv/media
 ```
 
 ## 🎬 Flux manuel

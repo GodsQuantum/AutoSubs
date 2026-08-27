@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FormatKey {
     #[default]
@@ -62,7 +64,12 @@ pub struct FormatProfile {
 
 impl Default for FormatProfile {
     fn default() -> Self {
-        Self { key: FormatKey::Source, fit: FitMode::Preserve, width: None, height: None }
+        Self {
+            key: FormatKey::Source,
+            fit: FitMode::Preserve,
+            width: None,
+            height: None,
+        }
     }
 }
 
@@ -87,7 +94,16 @@ impl FormatProfile {
             "source" => FormatKey::Source,
             _ => FormatKey::Source,
         };
-        Self { key, fit: if key == FormatKey::Source { FitMode::Preserve } else { FitMode::Cover }, width: None, height: None }
+        Self {
+            key,
+            fit: if key == FormatKey::Source {
+                FitMode::Preserve
+            } else {
+                FitMode::Cover
+            },
+            width: None,
+            height: None,
+        }
     }
 }
 
@@ -122,19 +138,45 @@ pub enum AnimationStyle {
     None,
 }
 
-fn default_size() -> f64 { 26.0 }
-fn default_50() -> f64 { 50.0 }
-fn default_66() -> f64 { 66.0 }
-fn default_white() -> String { "#ffffff".into() }
-fn default_black() -> String { "#000000".into() }
-fn default_highlight() -> String { "#00d2ff".into() }
-fn default_font() -> String { "Roboto".into() }
-fn default_true() -> bool { true }
-fn default_outline() -> f64 { 2.5 }
-fn default_border_style() -> u8 { 1 }
-fn default_max_chars() -> u32 { 25 }
-fn default_max_lines() -> u32 { 2 }
-fn default_one() -> f64 { 1.0 }
+fn default_size() -> f64 {
+    26.0
+}
+fn default_50() -> f64 {
+    50.0
+}
+fn default_66() -> f64 {
+    66.0
+}
+fn default_white() -> String {
+    "#ffffff".into()
+}
+fn default_black() -> String {
+    "#000000".into()
+}
+fn default_highlight() -> String {
+    "#00d2ff".into()
+}
+fn default_font() -> String {
+    "Roboto".into()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_outline() -> f64 {
+    2.5
+}
+fn default_border_style() -> u8 {
+    1
+}
+fn default_max_chars() -> u32 {
+    25
+}
+fn default_max_lines() -> u32 {
+    2
+}
+fn default_one() -> f64 {
+    1.0
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -148,7 +190,11 @@ pub struct Preset {
     pub legacy_brand: Option<String>,
     #[serde(default)]
     pub format: FormatProfile,
-    #[serde(default, rename = "aspectRatio", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "aspectRatio",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub legacy_aspect_ratio: Option<String>,
     #[serde(default)]
     pub animation_style: AnimationStyle,
@@ -242,8 +288,14 @@ impl Preset {
             self.format = FormatProfile::from_legacy_aspect_ratio(&legacy);
             changed = true;
         }
-        if self.max_chars == 0 { self.max_chars = default_max_chars(); changed = true; }
-        if self.max_lines == 0 { self.max_lines = default_max_lines(); changed = true; }
+        if self.max_chars == 0 {
+            self.max_chars = default_max_chars();
+            changed = true;
+        }
+        if self.max_lines == 0 {
+            self.max_lines = default_max_lines();
+            changed = true;
+        }
         changed
     }
 }
@@ -292,7 +344,9 @@ impl Brand {
         if self.id.trim().is_empty() {
             self.id = Uuid::new_v4().to_string();
             true
-        } else { false }
+        } else {
+            false
+        }
     }
 }
 
@@ -327,14 +381,16 @@ impl Workflow {
             self.id = Uuid::new_v4().to_string();
             changed = true;
         }
-        if self.archive_dir.is_empty() { self.archive_dir = "./archives".into(); changed = true; }
-        if self.preset_id.is_none() {
-            if let Some(name) = self.preset_name.as_deref() {
-                if let Some(preset) = presets.iter().find(|p| p.name == name) {
-                    self.preset_id = Some(preset.id.clone());
-                    changed = true;
-                }
-            }
+        if self.archive_dir.is_empty() {
+            self.archive_dir = "./archives".into();
+            changed = true;
+        }
+        if self.preset_id.is_none()
+            && let Some(name) = self.preset_name.as_deref()
+            && let Some(preset) = presets.iter().find(|p| p.name == name)
+        {
+            self.preset_id = Some(preset.id.clone());
+            changed = true;
         }
         changed
     }
@@ -343,8 +399,12 @@ impl Workflow {
 fn default_transcription_url() -> String {
     std::env::var("AUTOSUBS_TRANSCRIPTION_URL").unwrap_or_default()
 }
-fn default_model() -> String { std::env::var("AUTOSUBS_TRANSCRIPTION_MODEL").unwrap_or_else(|_| "large-v3".into()) }
-fn default_lang() -> String { std::env::var("AUTOSUBS_TRANSCRIPTION_LANGUAGE").unwrap_or_else(|_| "fr".into()) }
+fn default_model() -> String {
+    std::env::var("AUTOSUBS_TRANSCRIPTION_MODEL").unwrap_or_else(|_| "large-v3".into())
+}
+fn default_lang() -> String {
+    std::env::var("AUTOSUBS_TRANSCRIPTION_LANGUAGE").unwrap_or_else(|_| "fr".into())
+}
 fn default_llm_prompt() -> String {
     "Corrige uniquement l'orthographe, la grammaire et la ponctuation. Garde exactement le même nombre de blocs et leur ordre. Renvoie uniquement les blocs corrigés, un par ligne.".into()
 }
@@ -387,7 +447,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let local_url = std::env::var("AUTOSUBS_LOCAL_TRANSCRIPTION_URL")
-            .or_else(|_| std::env::var("SPEACHES_URL")).unwrap_or_default();
+            .or_else(|_| std::env::var("SPEACHES_URL"))
+            .unwrap_or_default();
         let local_enabled = std::env::var("AUTOSUBS_LOCAL_TRANSCRIPTION_ENABLED")
             .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
             .unwrap_or(!local_url.is_empty());
@@ -396,16 +457,23 @@ impl Default for Settings {
             .unwrap_or(true);
         Self {
             transcription_url: default_transcription_url(),
-            transcription_api_key: std::env::var("AUTOSUBS_TRANSCRIPTION_API_KEY").unwrap_or_default(),
+            transcription_api_key: std::env::var("AUTOSUBS_TRANSCRIPTION_API_KEY")
+                .unwrap_or_default(),
             transcription_model: default_model(),
             language: default_lang(),
             local_transcription_enabled: local_enabled,
             local_fallback_enabled: fallback,
             local_transcription_url: local_url,
-            local_transcription_api_key: std::env::var("AUTOSUBS_LOCAL_TRANSCRIPTION_API_KEY").unwrap_or_default(),
-            local_transcription_model: std::env::var("AUTOSUBS_LOCAL_TRANSCRIPTION_MODEL").unwrap_or_else(|_| "large-v3".into()),
-            llm_enabled: false, llm_endpoint: String::new(), llm_api_key: String::new(), llm_model: String::new(),
-            llm_prompt: default_llm_prompt(), encoder: Encoder::default(),
+            local_transcription_api_key: std::env::var("AUTOSUBS_LOCAL_TRANSCRIPTION_API_KEY")
+                .unwrap_or_default(),
+            local_transcription_model: std::env::var("AUTOSUBS_LOCAL_TRANSCRIPTION_MODEL")
+                .unwrap_or_else(|_| "large-v3".into()),
+            llm_enabled: false,
+            llm_endpoint: String::new(),
+            llm_api_key: String::new(),
+            llm_model: String::new(),
+            llm_prompt: default_llm_prompt(),
+            encoder: Encoder::default(),
         }
     }
 }
@@ -434,10 +502,20 @@ pub struct Encoder {
     #[serde(default = "default_encoder_preset")]
     pub preset: String,
 }
-fn default_quality() -> u8 { 20 }
-fn default_encoder_preset() -> String { "medium".into() }
+fn default_quality() -> u8 {
+    20
+}
+fn default_encoder_preset() -> String {
+    "medium".into()
+}
 impl Default for Encoder {
-    fn default() -> Self { Self { kind: EncoderKind::Auto, quality: 20, preset: "medium".into() } }
+    fn default() -> Self {
+        Self {
+            kind: EncoderKind::Auto,
+            quality: 20,
+            preset: "medium".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -459,7 +537,15 @@ pub enum JobStatus {
 
 impl JobStatus {
     pub fn is_active(&self) -> bool {
-        matches!(self, Self::Pending | Self::Uploading | Self::Probing | Self::Transcribing | Self::Correcting | Self::Rendering)
+        matches!(
+            self,
+            Self::Pending
+                | Self::Uploading
+                | Self::Probing
+                | Self::Transcribing
+                | Self::Correcting
+                | Self::Rendering
+        )
     }
 }
 
@@ -547,7 +633,8 @@ mod tests {
         let mut preset: Preset = serde_json::from_value(serde_json::json!({
             "name": "Vertical",
             "aspectRatio": "9:16"
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(preset.migrate());
         assert_eq!(preset.format.key, FormatKey::Portrait916);
         assert_eq!(preset.format.fit, FitMode::Cover);

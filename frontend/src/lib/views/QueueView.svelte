@@ -116,9 +116,9 @@
     <section class="modal" style="grid-template-rows:auto minmax(0,1fr) auto">
       <div class="modal-head"><strong>{$dictionary.addServerVideo}</strong><button class="btn icon ghost" on:click={()=>serverVideo=''}>×</button></div>
       <div class="card-body stack">
-        <div class="field"><label>{$dictionary.source}</label><input class="input mono" value={serverVideo} readonly /></div>
-        <div class="field"><label>{$dictionary.attachedSidecar}</label><div class="row"><input class="input mono" bind:value={serverSidecar} placeholder={$dictionary.none}/><button class="btn" on:click={()=>serverSidecarPicker=true}>{$dictionary.browse}</button></div></div>
-        <div class="field"><label>{$dictionary.preset}</label><select class="select" bind:value={serverPreset}><option value="">{$dictionary.none}</option>{#each presets as p}<option value={p.id}>{p.name}</option>{/each}</select></div>
+        <div class="field"><label for="queue-field-1">{$dictionary.source}</label><input id="queue-field-1" class="input mono" value={serverVideo} readonly /></div>
+        <div class="field"><label for="queue-field-2">{$dictionary.attachedSidecar}</label><div class="row"><input id="queue-field-2" class="input mono" bind:value={serverSidecar} placeholder={$dictionary.none}/><button class="btn" on:click={()=>serverSidecarPicker=true}>{$dictionary.browse}</button></div></div>
+        <div class="field"><label for="queue-field-3">{$dictionary.preset}</label><select id="queue-field-3" class="select" bind:value={serverPreset}><option value="">{$dictionary.none}</option>{#each presets as p}<option value={p.id}>{p.name}</option>{/each}</select></div>
         <div class="help">{$dictionary.serverFileHint}</div>
       </div>
       <div class="modal-foot"><button class="btn" on:click={()=>serverVideo=''}>{$dictionary.close}</button><button class="btn primary" on:click={fromServer}>{$dictionary.prepare}</button></div>

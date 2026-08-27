@@ -43,7 +43,7 @@
 
 {#if open}
   <div class="modal-backdrop" role="presentation" on:click={(e)=>{ if(e.currentTarget===e.target)onclose(); }}>
-    <section class="modal" role="dialog" aria-modal="true" aria-label={title || $dictionary.filePicker}>
+    <div class="modal" role="dialog" aria-modal="true" aria-label={title || $dictionary.filePicker}>
       <div class="modal-head">
         <strong>{title || $dictionary.filePicker}</strong>
         <button class="btn icon ghost" on:click={onclose} aria-label={$dictionary.close}>×</button>
@@ -77,6 +77,6 @@
         <span class="muted small">{mode==='directory' ? $dictionary.folder : mode==='file' ? $dictionary.file : $dictionary.filePicker}</span>
         <div class="row"><button class="btn" on:click={onclose}>{$dictionary.close}</button>{#if mode!=='file'}<button class="btn primary" disabled={!currentPath} on:click={chooseCurrent}>{$dictionary.choose}</button>{/if}</div>
       </div>
-    </section>
+    </div>
   </div>
 {/if}
