@@ -12,8 +12,41 @@ permissions:
   id-token: write
   attestations: write
 
+
 jobs:
+  ghcr-access:
+    name: GHCR access preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify GHCR package write access
+        shell: bash
+        run: |
+          probe_dir="${RUNNER_TEMP}/autosubs-ghcr-probe"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autosubs:permission-probe-${GITHUB_RUN_ID}"
+
+          mkdir -p "$probe_dir"
+          printf 'AutoSubs GHCR permission probe\n' > "$probe_dir/probe.txt"
+
+          cat > "$probe_dir/Dockerfile" <<'EOF'
+          FROM scratch
+          COPY probe.txt /probe.txt
+          EOF
+
+          docker build -t "$image" "$probe_dir"
+          docker push "$image"
+
   image:
+    needs: ghcr-access
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
@@ -44,6 +77,8 @@ jobs:
           provenance: mode=max
           sbom: true
 
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Attest published image
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
