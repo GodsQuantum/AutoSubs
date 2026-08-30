@@ -1,0 +1,36 @@
+name: Bug report
+description: Report a reproducible AutoSubs problem.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Please remove API keys, private URLs and personal media paths from logs before posting."
+  - type: input
+    id: version
+    attributes:
+      label: AutoSubs version / image digest
+      placeholder: latest, v3.0.0, or sha256:…
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes: { label: Expected behavior }
+    validations: { required: true }
+  - type: textarea
+    id: actual
+    attributes: { label: What happened }
+    validations: { required: true }
+  - type: textarea
+    id: reproduce
+    attributes: { label: Reproduction steps }
+    validations: { required: true }
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Host OS, Docker version, CPU/GPU, FFmpeg capability information, browser, storage type (local/NFS/etc.).
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: shell

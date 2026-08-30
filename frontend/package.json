@@ -1,0 +1,26 @@
+{
+  "name": "autosubs-frontend",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --tsgo",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "3.0.10",
+    "@sveltejs/kit": "2.70.3",
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "@typescript/native": "npm:typescript@7.0.2",
+    "svelte": "5.56.10",
+    "svelte-check": "4.7.6",
+    "typescript": "~6.0.3",
+    "vite": "8.2.2"
+  },
+  "overrides": {
+    "cookie": "0.7.2"
+  }
+}

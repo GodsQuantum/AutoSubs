@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">AutoSubs</title>
+  <desc id="desc">Play symbol combined with subtitle lines</desc>
+  <defs>
+    <linearGradient id="g" x1="88" y1="72" x2="428" y2="444" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#55e6df"/>
+      <stop offset="1" stop-color="#16b7c6"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000" flood-opacity=".30"/>
+    </filter>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="#0a0f13"/>
+  <rect x="25" y="25" width="462" height="462" rx="111" fill="none" stroke="#24333b" stroke-width="2"/>
+  <g filter="url(#shadow)">
+    <path d="M132 116h183c45 0 81 36 81 81v90c0 15-12 27-27 27s-27-12-27-27v-90c0-15-12-27-27-27H132c-15 0-27 12-27 27v103c0 15 12 27 27 27h50c15 0 27 12 27 27s-12 27-27 27h-50c-45 0-81-36-81-81V197c0-45 36-81 81-81Z" fill="url(#g)"/>
+    <path d="M181 192c0-13 14-21 25-14l99 61c11 7 11 23 0 30l-99 61c-11 7-25-1-25-14V192Z" fill="#63f2e9"/>
+    <rect x="224" y="343" width="194" height="54" rx="24" fill="#111b20" stroke="url(#g)" stroke-width="14"/>
+    <rect x="257" y="360" width="128" height="10" rx="5" fill="#63f2e9"/>
+    <rect x="272" y="403" width="112" height="28" rx="14" fill="url(#g)"/>
+  </g>
+</svg>

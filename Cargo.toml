@@ -1,0 +1,49 @@
+[package]
+name = "autosubs"
+version = "3.0.0"
+edition = "2024"
+rust-version = "1.98"
+authors = ["GodsQuantum"]
+description = "Self-hosted subtitle production for video"
+license = "MIT"
+repository = "https://github.com/GodsQuantum/AutoSubs"
+keywords = ["subtitles", "ffmpeg", "transcription", "self-hosted", "video"]
+categories = ["multimedia::video", "web-programming::http-server"]
+
+[dependencies]
+anyhow = "1"
+async-stream = "0.3"
+base64 = "0.23.1"
+axum = { version = "0.8.9", features = ["multipart", "macros"] }
+bytes = "1"
+clap = { version = "4", features = ["derive", "env"] }
+dashmap = "6"
+futures-util = "0.3"
+mime_guess = "2"
+notify = "8.2"
+regex = "1"
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json", "multipart", "stream", "http2"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["io", "rt"] }
+tower = "0.5"
+tower-http = { version = "0.7.0", features = ["fs", "set-header", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+unicode-linebreak = "0.1.5"
+unicode-segmentation = "1"
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
