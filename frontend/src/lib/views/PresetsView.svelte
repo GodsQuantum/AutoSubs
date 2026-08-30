@@ -1,23 +1,34 @@
 <script lang="ts">
   import { api } from '$lib/api';
   import { dictionary } from '$lib/i18n';
-  import type { Brand, FormatKey, FitMode, Preset } from '$lib/types';
+  import type { Brand, FormatKey, Preset } from '$lib/types';
   import FormatPreview from '$lib/components/FormatPreview.svelte';
   export let presets:Preset[]=[];
   export let brands:Brand[]=[];
   export let refresh:()=>Promise<void>=async()=>{};
   export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
 
+  type SafeZoneKey = 'off'|'generic'|'tiktok'|'reels'|'shorts';
   let selected='';
   let draft:Preset=makePreset();
+  let previousFormatKey:FormatKey=draft.format.key;
+  let safeZone:SafeZoneKey='generic';
   $: current=presets.find(p=>p.id===selected);
   $: if(current && draft.id!==current.id) draft=clone(current);
+  $: if(draft.format.key!==previousFormatKey){
+    previousFormatKey=draft.format.key;
+    if(draft.format.key==='source') draft.format.fit='preserve';
+    else if(draft.format.fit==='preserve') draft.format.fit='cover';
+  }
 
   function makePreset():Preset{return {id:'',name:'New preset',format:{key:'source',fit:'preserve'},animationStyle:'pop',size:28,positionX:50,positionY:68,baseColor:'#ffffff',outlineColor:'#000000',highlightColor:'#3dd7cf',fontFamily:'Inter',uppercase:false,outlineThickness:2.5,shadowThickness:1.2,shadowColor:'#000000',borderStyle:1,floating:false,maxChars:25,maxLines:2,wobbleSpeed:1,bold:true,italic:false,lineSpacing:0};}
   const clone=(p:Preset):Preset=>JSON.parse(JSON.stringify(p));
-  function create(){selected='';draft=makePreset()}
-  function duplicate(){draft={...clone(draft),id:'',name:`${draft.name} copy`};selected=''}
-  async function save(){try{const saved=await api.savePreset(draft);selected=saved.id;draft=clone(saved);await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
+  function create(){selected='';draft=makePreset();previousFormatKey=draft.format.key}
+  function duplicate(){draft={...clone(draft),id:'',name:`${draft.name} copy`};selected='';previousFormatKey=draft.format.key}
+  async function save(){
+    if(draft.format.key==='custom' && (!Number.isInteger(Number(draft.format.width))||!Number.isInteger(Number(draft.format.height))||Number(draft.format.width)<16||Number(draft.format.height)<16||Number(draft.format.width)>16384||Number(draft.format.height)>16384||Number(draft.format.width)%2!==0||Number(draft.format.height)%2!==0)){notify('error',`${$dictionary.custom}: ${$dictionary.width} × ${$dictionary.height}`);return;}
+    try{const saved=await api.savePreset(draft);selected=saved.id;draft=clone(saved);await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}
+  }
   async function remove(){if(!draft.id||!confirm($dictionary.confirmDelete))return;try{await api.deletePreset(draft.id);selected='';draft=makePreset();await refresh()}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
 </script>
 <div class="page">
@@ -33,7 +44,7 @@
         <div class="field"><label for="presets-field-2">{$dictionary.brand}</label><select id="presets-field-2" class="select" bind:value={draft.brandId}><option value="">{$dictionary.noBrand}</option>{#each brands as b}<option value={b.id}>{b.name}</option>{/each}</select></div>
         <div class="field"><label for="presets-field-3">{$dictionary.format}</label><select id="presets-field-3" class="select" bind:value={draft.format.key}><option value="source">{$dictionary.sourceFormat}</option><option value="portrait916">9:16</option><option value="landscape169">16:9</option><option value="square11">1:1</option><option value="portrait45">4:5</option><option value="custom">{$dictionary.custom}</option></select></div>
         <div class="field"><label for="presets-field-4">{$dictionary.fit}</label><select id="presets-field-4" class="select" bind:value={draft.format.fit} disabled={draft.format.key==='source'}><option value="preserve">{$dictionary.preserve}</option><option value="contain">{$dictionary.contain}</option><option value="cover">{$dictionary.cover}</option><option value="stretch">{$dictionary.stretch}</option></select></div>
-        {#if draft.format.key==='custom'}<div class="field"><label for="presets-field-5">{$dictionary.width}</label><input id="presets-field-5" class="input" type="number" bind:value={draft.format.width}/></div><div class="field"><label for="presets-field-6">{$dictionary.height}</label><input id="presets-field-6" class="input" type="number" bind:value={draft.format.height}/></div>{/if}
+        {#if draft.format.key==='custom'}<div class="field"><label for="presets-field-5">{$dictionary.width}</label><input id="presets-field-5" class="input" type="number" min="16" max="16384" step="2" bind:value={draft.format.width}/></div><div class="field"><label for="presets-field-6">{$dictionary.height}</label><input id="presets-field-6" class="input" type="number" min="16" max="16384" step="2" bind:value={draft.format.height}/></div>{/if}
       </div></section>
 
       <div class="grid two">
@@ -50,7 +61,10 @@
           <div class="grid two"><div class="field"><label for="presets-field-19">{$dictionary.lineSpacing}</label><input id="presets-field-19" class="input" type="number" step=".5" bind:value={draft.lineSpacing}/></div><div class="field"><label for="presets-field-20">{$dictionary.wobbleSpeed}</label><input id="presets-field-20" class="input" type="number" step=".1" bind:value={draft.wobbleSpeed}/></div></div>
         </div></section>
       </div>
-      <section class="card"><div class="card-header"><strong>{$dictionary.preview}</strong></div><div class="card-body"><div class="preview-shell"><FormatPreview format={draft.format} preset={draft} text={$dictionary.sampleText}/></div></div></section>
+      <section class="card">
+        <div class="card-header"><strong>{$dictionary.preview}</strong><div class="segmented"><button class:active={safeZone==='off'} on:click={()=>safeZone='off'}>{$dictionary.none}</button><button class:active={safeZone==='generic'} on:click={()=>safeZone='generic'}>Generic</button><button class:active={safeZone==='tiktok'} on:click={()=>safeZone='tiktok'}>TikTok</button><button class:active={safeZone==='reels'} on:click={()=>safeZone='reels'}>Reels</button><button class:active={safeZone==='shorts'} on:click={()=>safeZone='shorts'}>Shorts</button></div></div>
+        <div class="card-body"><div class="preview-shell"><FormatPreview format={draft.format} preset={draft} text={$dictionary.sampleText} {safeZone} editable={true} onPositionChange={(x,y)=>{draft.positionX=Math.round(x);draft.positionY=Math.round(y);draft={...draft};}}/></div></div>
+      </section>
     </div>
   </div>
 </div>

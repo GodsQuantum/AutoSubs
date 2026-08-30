@@ -192,18 +192,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     let curr_y = (start_y
                         + visual_index as f64 * (preset.size + preset.line_spacing))
                         .round() as i32;
-                    let animation = match preset.animation_style {
-                        AnimationStyle::Fade => "{\\fad(150,150)}".to_string(),
-                        AnimationStyle::Bounce => {
+                    let (position, animation) = match preset.animation_style {
+                        AnimationStyle::Fade => (
+                            format!("{{\\pos({x},{curr_y})}}"),
+                            "{\\fad(150,150)}".to_string(),
+                        ),
+                        AnimationStyle::Bounce => (
+                            format!("{{\\pos({x},{curr_y})}}"),
                             "{\\t(0,120,\\fscy125\\fscx105)\\t(120,240,\\fscy100\\fscx100)}"
-                                .to_string()
-                        }
-                        AnimationStyle::SlideUp => {
-                            format!("{{\\move({x},{},{x},{curr_y},0,180)}}", curr_y + 25)
-                        }
-                        _ => String::new(),
+                                .to_string(),
+                        ),
+                        AnimationStyle::SlideUp => (
+                            String::new(),
+                            format!("{{\\move({x},{},{x},{curr_y},0,180)}}", curr_y + 25),
+                        ),
+                        _ => (format!("{{\\pos({x},{curr_y})}}"), String::new()),
                     };
-                    let mut rendered = format!("{{\\pos({x},{curr_y})}}{float}{animation}");
+                    let mut rendered = format!("{position}{float}{animation}");
                     if preset.animation_style == AnimationStyle::Karaoke {
                         for (idx, token) in visual.split_whitespace().enumerate() {
                             if idx > 0 {
@@ -281,6 +286,21 @@ mod tests {
         let ass = generate_ass_content(&[sample_line()], &preset, Some((1920, 1080)));
         assert!(ass.contains("PlayResX: 1080"));
         assert!(ass.contains("PlayResY: 1080"));
+    }
+
+    #[test]
+    fn slide_up_uses_move_without_conflicting_pos_tag() {
+        let preset = Preset {
+            animation_style: AnimationStyle::SlideUp,
+            ..Preset::default()
+        };
+        let ass = generate_ass_content(&[sample_line()], &preset, Some((1920, 1080)));
+        let dialogue = ass
+            .lines()
+            .find(|line| line.starts_with("Dialogue:"))
+            .unwrap();
+        assert!(dialogue.contains("\\move("));
+        assert!(!dialogue.contains("\\pos("));
     }
 
     #[test]

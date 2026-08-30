@@ -4,6 +4,8 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-31
+
 ### Added
 
 - Clean-room Rust/Axum + SvelteKit architecture.
@@ -13,6 +15,18 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 - Brands, per-format presets, independent watch-folder workflows and NFS reconciliation.
 - FFmpeg/libass rendering with capability discovery, hardware selection/fallback and machine-readable progress.
 - Responsive English/French UI for desktop, tablet and phone.
-- Multi-architecture GHCR release pipeline with SBOM/provenance.
+- Multi-architecture GHCR release pipeline with SBOM, provenance and registry attestations.
+- Accurate Source, 9:16, 16:9, 1:1, 4:5 and custom output previews.
+- Advisory Generic, TikTok, Reels and Shorts safe-zone guides.
+- Pointer and keyboard subtitle-position editing in preset previews.
 
-The first clean-room release will be tagged `v3.0.0` after CI validation.
+### Fixed
+
+- Explicit output formats no longer retain the invalid `preserve` fit mode.
+- Custom output dimensions are validated before rendering.
+- Editor preview now follows contain, cover and stretch rendering semantics.
+- ASS Slide Up animation no longer combines conflicting `\\pos` and `\\move` tags.
+- ASS export now uses the effective job output format and source resolution.
+- SSA sidecar selection is available consistently in the editor.
+- Rendering no longer continues after subtitle or job-option persistence fails.
+- Native WebVTT caption tracks are retained for preview accessibility.

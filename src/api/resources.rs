@@ -1,6 +1,7 @@
 use crate::{
     domain::{Brand, Preset, Workflow},
     error::{AppError, AppResult},
+    format::normalize_format_profile,
     state::AppState,
     workflows,
 };
@@ -18,6 +19,7 @@ pub async fn upsert_preset(
     Json(mut preset): Json<Preset>,
 ) -> AppResult<Json<Preset>> {
     preset.migrate();
+    normalize_format_profile(&mut preset.format).map_err(AppError::BadRequest)?;
     if preset.name.trim().is_empty() {
         return Err(AppError::BadRequest("preset name is required".into()));
     }
@@ -156,6 +158,7 @@ pub async fn upsert_workflow(
     if workflow.id.trim().is_empty() {
         workflow.id = Uuid::new_v4().to_string();
     }
+    normalize_format_profile(&mut workflow.format).map_err(AppError::BadRequest)?;
     if workflow.name.trim().is_empty() {
         return Err(AppError::BadRequest("workflow name is required".into()));
     }

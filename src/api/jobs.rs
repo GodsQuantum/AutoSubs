@@ -1,7 +1,9 @@
 use crate::{
     domain::{FormatProfile, Job, SubtitleLine},
     error::{AppError, AppResult},
+    format::normalize_format_profile,
     jobs,
+    media::probe_media,
     state::AppState,
 };
 use axum::{
@@ -12,6 +14,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
+use tokio_util::sync::CancellationToken;
 
 pub async fn list_jobs(State(state): State<AppState>) -> Json<Vec<Job>> {
     let mut jobs: Vec<Job> = state
@@ -58,7 +61,10 @@ pub async fn update_job_options(
         return Err(AppError::BadRequest("unknown presetId".into()));
     }
     let preset_id = body.preset_id;
-    let format = body.format;
+    let mut format = body.format;
+    if let Some(profile) = format.as_mut() {
+        normalize_format_profile(profile).map_err(AppError::BadRequest)?;
+    }
     jobs::update_job(&state, &id, move |job| {
         job.preset_id = preset_id;
         if let Some(format) = format {
@@ -265,7 +271,7 @@ pub async fn export_subtitles(
     Path((id, format)): Path<(String, String)>,
 ) -> AppResult<(axum::http::HeaderMap, Bytes)> {
     let job = jobs::get_job(&state, &id).map_err(|_| AppError::NotFound("job not found".into()))?;
-    let lines = job.lines.unwrap_or_default();
+    let lines = job.lines.clone().unwrap_or_default();
     let mut headers = axum::http::HeaderMap::new();
     let (mime, data) = match format.as_str() {
         "srt" => (
@@ -274,12 +280,23 @@ pub async fn export_subtitles(
         ),
         "json" => ("application/json", serde_json::to_vec_pretty(&lines)?),
         "ass" => {
-            let preset =
+            let mut preset =
                 jobs::resolve_preset(&state, &job.original_name, None, job.preset_id.as_deref())
                     .await;
+            preset.format = job.format.clone();
+            let source_resolution = if let Some(input) = job.input_path.as_ref() {
+                let token = CancellationToken::new();
+                let probe = probe_media(input, &token)
+                    .await
+                    .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+                Some((probe.width, probe.height))
+            } else {
+                None
+            };
             (
                 "text/x-ssa",
-                crate::subtitle::ass::generate_ass_content(&lines, &preset, None).into_bytes(),
+                crate::subtitle::ass::generate_ass_content(&lines, &preset, source_resolution)
+                    .into_bytes(),
             )
         }
         _ => {
