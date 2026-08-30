@@ -11,55 +11,33 @@ permissions:
   packages: write
   id-token: write
   attestations: write
+  artifact-metadata: write
 
+concurrency:
+  group: image-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
 
 jobs:
-  ghcr-access:
-    name: GHCR access preflight
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify GHCR package write access
-        shell: bash
-        run: |
-          probe_dir="${RUNNER_TEMP}/autosubs-ghcr-probe"
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autosubs:permission-probe-${GITHUB_RUN_ID}"
-
-          mkdir -p "$probe_dir"
-          printf 'AutoSubs GHCR permission probe\n' > "$probe_dir/probe.txt"
-
-          cat > "$probe_dir/Dockerfile" <<'EOF'
-          FROM scratch
-          COPY probe.txt /probe.txt
-          EOF
-
-          docker build -t "$image" "$probe_dir"
-          docker push "$image"
-
   image:
-    needs: ghcr-access
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
-       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
+       (github.event.workflow_run.event == 'push' ||
+        github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -72,13 +50,17 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
+          pull: true
           push: true
           tags: ghcr.io/godsquantum/autosubs:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
           provenance: mode=max
           sbom: true
-
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
       - name: Attest published image
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

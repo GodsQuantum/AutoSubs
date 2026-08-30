@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -18,8 +19,11 @@ jobs:
   lockfiles:
     name: Lockfiles
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Verify reproducible lockfiles
         run: |
           test -s Cargo.lock
@@ -29,8 +33,11 @@ jobs:
     name: Rust
     needs: lockfiles
     runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install Rust 1.98.0
         run: |
           rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt
@@ -50,14 +57,17 @@ jobs:
     name: Frontend
     needs: lockfiles
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24.19.0'
+          node-version: '24.20.0'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -70,8 +80,11 @@ jobs:
     name: Container
     needs: [lockfiles, rust, frontend]
     runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Build runtime image
         run: docker build --pull -t autosubs-ci .
       - name: Runtime capability smoke test
