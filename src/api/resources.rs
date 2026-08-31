@@ -162,18 +162,9 @@ pub async fn upsert_workflow(
     if workflow.name.trim().is_empty() {
         return Err(AppError::BadRequest("workflow name is required".into()));
     }
-    for (field, value) in [
-        ("watchDir", &workflow.watch_dir),
-        ("outputDir", &workflow.output_dir),
-        ("archiveDir", &workflow.archive_dir),
-    ] {
-        let path = std::path::Path::new(value);
-        if !path.is_dir() || !state.config.path_is_allowed(path) {
-            return Err(AppError::BadRequest(format!(
-                "{field} must be an existing directory inside AUTOSUBS_ALLOWED_ROOTS"
-            )));
-        }
-    }
+    workflow.watch_dir = canonical_workflow_dir(&state, "watchDir", &workflow.watch_dir)?;
+    workflow.output_dir = canonical_workflow_dir(&state, "outputDir", &workflow.output_dir)?;
+    workflow.archive_dir = canonical_workflow_dir(&state, "archiveDir", &workflow.archive_dir)?;
     if let Some(id) = &workflow.preset_id
         && !state.presets.read().await.iter().any(|p| &p.id == id)
     {
@@ -217,6 +208,14 @@ pub async fn delete_workflow(
         token.cancel();
     }
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+fn canonical_workflow_dir(state: &AppState, field: &str, value: &str) -> AppResult<String> {
+    state.config.resolve_allowed_dir_string(value).map_err(|_| {
+        AppError::BadRequest(format!(
+            "{field} must be an existing directory inside AUTOSUBS_ALLOWED_ROOTS"
+        ))
+    })
 }
 
 async fn rebuild_brand_membership(state: &AppState) -> AppResult<()> {

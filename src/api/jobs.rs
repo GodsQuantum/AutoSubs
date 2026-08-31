@@ -1,4 +1,5 @@
 use crate::{
+    config::Config,
     domain::{FormatProfile, Job, SubtitleLine},
     error::{AppError, AppResult},
     format::normalize_format_profile,
@@ -87,21 +88,25 @@ pub async fn create_from_path(
     State(state): State<AppState>,
     Json(body): Json<FromPath>,
 ) -> AppResult<Json<Job>> {
-    let input = PathBuf::from(&body.path);
-    if !input.is_file() || !state.config.path_is_allowed(&input) {
-        return Err(AppError::Forbidden(
-            "video path is outside allowed roots or not a file".into(),
-        ));
-    }
-    let sidecar = body.sidecar_path.map(PathBuf::from);
-    if let Some(path) = &sidecar {
-        if !path.is_file() || !state.config.path_is_allowed(path) {
-            return Err(AppError::Forbidden(
-                "sidecar path is outside allowed roots or not a file".into(),
-            ));
+    let requested_input = PathBuf::from(&body.path);
+    let input = state
+        .config
+        .resolve_allowed_file(&requested_input)
+        .map_err(|_| {
+            AppError::Forbidden("video path is outside allowed roots or not a file".into())
+        })?;
+
+    let sidecar = match body.sidecar_path {
+        Some(value) => {
+            let requested = PathBuf::from(value);
+            let resolved = state.config.resolve_allowed_file(&requested).map_err(|_| {
+                AppError::Forbidden("sidecar path is outside allowed roots or not a file".into())
+            })?;
+            validate_sidecar_extension(&resolved)?;
+            Some(resolved)
         }
-        validate_sidecar_extension(path)?;
-    }
+        None => None,
+    };
     let original = input
         .file_name()
         .and_then(|v| v.to_str())
@@ -197,12 +202,11 @@ pub async fn set_sidecar(
     Path(id): Path<String>,
     Json(body): Json<SidecarPath>,
 ) -> AppResult<Json<Job>> {
-    let path = PathBuf::from(body.path);
-    if !path.is_file() || !state.config.path_is_allowed(&path) {
-        return Err(AppError::Forbidden(
-            "sidecar path is outside allowed roots".into(),
-        ));
-    }
+    let requested = PathBuf::from(body.path);
+    let path = state
+        .config
+        .resolve_allowed_file(&requested)
+        .map_err(|_| AppError::Forbidden("sidecar path is outside allowed roots".into()))?;
     validate_sidecar_extension(&path)?;
     let job = jobs::attach_sidecar(&state, &id, Some(path))
         .map_err(|e| AppError::Conflict(e.to_string()))?;
@@ -239,11 +243,17 @@ pub async fn upload_sidecar(
             .and_then(|v| v.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        if !matches!(ext.as_str(), "srt" | "ass" | "ssa" | "json") {
-            return Err(AppError::BadRequest(
-                "sidecar must be .srt, .ass, .ssa or .json".into(),
-            ));
-        }
+        let suffix = match ext.as_str() {
+            "srt" => "srt",
+            "ass" => "ass",
+            "ssa" => "ssa",
+            "json" => "json",
+            _ => {
+                return Err(AppError::BadRequest(
+                    "sidecar must be .srt, .ass, .ssa or .json".into(),
+                ));
+            }
+        };
         let bytes = field
             .bytes()
             .await
@@ -251,10 +261,9 @@ pub async fn upload_sidecar(
         if bytes.len() > 32 * 1024 * 1024 {
             return Err(AppError::BadRequest("sidecar is too large".into()));
         }
-        let path = state
-            .config
-            .uploads_dir()
-            .join(format!("{}.{}", uuid::Uuid::new_v4(), ext));
+        let stored = format!("{}.{}", uuid::Uuid::new_v4(), suffix);
+        let path =
+            Config::safe_child(&state.config.uploads_dir(), &stored).map_err(AppError::Internal)?;
         tokio::fs::write(&path, bytes).await?;
         uploaded = Some(path);
         break;

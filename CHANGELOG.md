@@ -4,6 +4,16 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-08-31
+
+### Security
+
+- Canonicalize and validate server-side paths before filesystem access.
+- Reject path-component injection in managed asset and upload storage.
+- Revalidate persisted workflow directories before watcher and render use.
+- Harden brand outro resolution against traversal through persisted values.
+- Replace privileged `workflow_run` image publishing with trusted `main` push validation.
+
 ## [3.0.0] - 2026-08-31
 
 ### Added

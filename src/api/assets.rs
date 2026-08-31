@@ -1,4 +1,5 @@
 use crate::{
+    config::Config,
     domain::Asset,
     error::{AppError, AppResult},
     jobs::now_ms,
@@ -33,18 +34,10 @@ pub async fn upload_asset(
         let mime = mime_guess::from_path(&name)
             .first_or_octet_stream()
             .to_string();
-        let ext = std::path::Path::new(&name)
-            .extension()
-            .and_then(|v| v.to_str())
-            .map(safe_ext)
-            .unwrap_or_default();
         let id = Uuid::new_v4().to_string();
-        let stored = if ext.is_empty() {
-            id.clone()
-        } else {
-            format!("{id}.{ext}")
-        };
-        let path = state.config.assets_dir().join(&stored);
+        let stored = id.clone();
+        let path =
+            Config::safe_child(&state.config.assets_dir(), &stored).map_err(AppError::Internal)?;
         let mut file = tokio::fs::File::create(&path).await?;
         let mut size = 0u64;
         while let Some(chunk) = field
@@ -87,29 +80,20 @@ pub async fn import_asset(
     State(state): State<AppState>,
     Json(body): Json<ImportAsset>,
 ) -> AppResult<Json<Asset>> {
-    let source = PathBuf::from(&body.path);
-    if !source.is_file() || !state.config.path_is_allowed(&source) {
-        return Err(AppError::Forbidden(
-            "asset path is outside allowed roots".into(),
-        ));
-    }
+    let requested = PathBuf::from(&body.path);
+    let source = state
+        .config
+        .resolve_allowed_file(&requested)
+        .map_err(|_| AppError::Forbidden("asset path is outside allowed roots".into()))?;
     let name = source
         .file_name()
         .and_then(|v| v.to_str())
         .unwrap_or("asset.bin")
         .to_owned();
-    let ext = source
-        .extension()
-        .and_then(|v| v.to_str())
-        .map(safe_ext)
-        .unwrap_or_default();
     let id = Uuid::new_v4().to_string();
-    let stored = if ext.is_empty() {
-        id.clone()
-    } else {
-        format!("{id}.{ext}")
-    };
-    let destination = state.config.assets_dir().join(&stored);
+    let stored = id.clone();
+    let destination =
+        Config::safe_child(&state.config.assets_dir(), &stored).map_err(AppError::Internal)?;
     let size = tokio::fs::copy(&source, &destination).await?;
     let mime = mime_guess::from_path(&source)
         .first_or_octet_stream()
@@ -138,17 +122,11 @@ pub async fn delete_asset(
         .get::<Asset>("asset", &id)
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("asset not found".into()))?;
-    let _ = tokio::fs::remove_file(state.config.assets_dir().join(asset.stored_file)).await;
+    let path = Config::safe_child(&state.config.assets_dir(), &asset.stored_file)
+        .map_err(AppError::Internal)?;
+    let _ = tokio::fs::remove_file(path).await;
     state.db.delete("asset", &id).map_err(AppError::Internal)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
-}
-fn safe_ext(value: &str) -> String {
-    value
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .take(12)
-        .collect::<String>()
-        .to_ascii_lowercase()
 }
 
 pub async fn stream_asset(
@@ -165,7 +143,8 @@ pub async fn stream_asset(
         .get::<Asset>("asset", &id)
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("asset not found".into()))?;
-    let path = state.config.assets_dir().join(&asset.stored_file);
+    let path = Config::safe_child(&state.config.assets_dir(), &asset.stored_file)
+        .map_err(AppError::Internal)?;
     if !path.is_file() {
         return Err(AppError::NotFound("asset file is missing".into()));
     }
