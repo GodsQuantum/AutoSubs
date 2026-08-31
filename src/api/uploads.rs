@@ -1,4 +1,5 @@
 use crate::{
+    config::Config,
     error::{AppError, AppResult},
     jobs,
     state::AppState,
@@ -54,9 +55,12 @@ pub async fn create_upload(
         ));
     }
     let filename = parse_filename(headers.get("Upload-Metadata").and_then(|v| v.to_str().ok()))
+        .map(|value| safe_filename(&value))
         .unwrap_or_else(|| "video".into());
     let id = Uuid::new_v4().to_string();
-    let staging = state.config.uploads_dir().join(format!(".{id}.uploading"));
+    let staging_name = format!(".{id}.uploading");
+    let staging = Config::safe_child(&state.config.uploads_dir(), &staging_name)
+        .map_err(AppError::Internal)?;
     tokio::fs::File::create(&staging).await?;
     let record = UploadRecord {
         id: id.clone(),
@@ -129,6 +133,19 @@ pub async fn patch_upload(
     }
     let client_offset = header_u64(&headers, "Upload-Offset")?;
     let mut record = load(&state, &id)?;
+
+    if record.id != id {
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "upload record id mismatch"
+        )));
+    }
+
+    let upload_id = Uuid::parse_str(&record.id)
+        .map_err(|_| AppError::Internal(anyhow::anyhow!("invalid persisted upload id")))?;
+    let staging_name = format!(".{upload_id}.uploading");
+    let staging = Config::safe_child(&state.config.uploads_dir(), &staging_name)
+        .map_err(AppError::Internal)?;
+
     if record.offset != client_offset {
         return Err(AppError::Conflict(format!(
             "upload offset mismatch: server={}, client={client_offset}",
@@ -140,7 +157,7 @@ pub async fn patch_upload(
     }
     let mut file = tokio::fs::OpenOptions::new()
         .append(true)
-        .open(&record.staging)
+        .open(&staging)
         .await?;
     let mut stream = body.into_data_stream();
     while let Some(chunk) = stream.next().await {
@@ -154,12 +171,11 @@ pub async fn patch_upload(
     }
     file.flush().await?;
     if record.offset == record.length {
-        let final_path = state.config.uploads_dir().join(format!(
-            "{}-{}",
-            record.id,
-            safe_filename(&record.filename)
-        ));
-        tokio::fs::rename(&record.staging, &final_path).await?;
+        let final_name = format!("{upload_id}.media");
+        let final_path = Config::safe_child(&state.config.uploads_dir(), &final_name)
+            .map_err(AppError::Internal)?;
+        tokio::fs::rename(&staging, &final_path).await?;
+        record.staging = staging;
         record.final_path = Some(final_path.clone());
         let job = jobs::create_job(
             &state,

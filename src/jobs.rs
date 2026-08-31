@@ -291,10 +291,13 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
     let source = probe_media(&input, token)
         .await
         .context("probe render input")?;
-    let output_dir = workflow
-        .as_ref()
-        .map(|w| PathBuf::from(&w.output_dir))
-        .unwrap_or_else(|| state.config.outputs_dir());
+    let output_dir = match workflow.as_ref() {
+        Some(workflow) => state
+            .config
+            .resolve_allowed_dir(Path::new(&workflow.output_dir))
+            .context("validate workflow output directory")?,
+        None => state.config.outputs_dir(),
+    };
     tokio::fs::create_dir_all(&output_dir).await?;
     let output_reservation = reserve_output_path(&output_dir, &job.original_name).await?;
     let final_video = output_reservation.path.clone();
@@ -417,8 +420,10 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
     if job.archive_after_success
         && let Some(workflow) = workflow.as_ref()
     {
-        let archive_dir = PathBuf::from(&workflow.archive_dir);
-        tokio::fs::create_dir_all(&archive_dir).await?;
+        let archive_dir = state
+            .config
+            .resolve_allowed_dir(Path::new(&workflow.archive_dir))
+            .context("validate workflow archive directory")?;
         let source_name = input
             .file_name()
             .ok_or_else(|| anyhow!("source has no filename"))?;
@@ -643,17 +648,23 @@ async fn resolve_outro(state: &AppState, preset: &Preset) -> Option<PathBuf> {
         .clone()
         .or_else(|| brand.and_then(|b| b.assets.default_outro.clone()))?;
     let direct = PathBuf::from(&value);
-    if direct.is_absolute() && direct.exists() && state.config.path_is_allowed(&direct) {
-        return Some(direct);
+    if direct.is_absolute()
+        && let Ok(path) = state.config.resolve_allowed_file(&direct)
+    {
+        return Some(path);
     }
-    if let Ok(Some(asset)) = state.db.get::<Asset>("asset", &value) {
-        let path = state.config.assets_dir().join(asset.stored_file);
-        if path.exists() {
-            return Some(path);
-        }
+
+    if let Ok(Some(asset)) = state.db.get::<Asset>("asset", &value)
+        && let Ok(path) =
+            crate::config::Config::safe_child(&state.config.assets_dir(), &asset.stored_file)
+        && path.is_file()
+    {
+        return Some(path);
     }
-    let asset = state.config.assets_dir().join(value);
-    asset.exists().then_some(asset)
+
+    crate::config::Config::safe_child(&state.config.assets_dir(), &value)
+        .ok()
+        .filter(|path| path.is_file())
 }
 
 #[derive(Default)]

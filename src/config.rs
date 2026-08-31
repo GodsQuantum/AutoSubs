@@ -58,6 +58,12 @@ impl Config {
         for path in [&self.config_dir, &self.data_dir] {
             std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
         }
+
+        self.config_dir = std::fs::canonicalize(&self.config_dir)
+            .with_context(|| format!("canonicalize {}", self.config_dir.display()))?;
+        self.data_dir = std::fs::canonicalize(&self.data_dir)
+            .with_context(|| format!("canonicalize {}", self.data_dir.display()))?;
+
         for path in [
             self.uploads_dir(),
             self.outputs_dir(),
@@ -97,13 +103,67 @@ impl Config {
         self.data_dir.join("work")
     }
 
-    pub fn path_is_allowed(&self, path: &Path) -> bool {
-        let Ok(canon) = std::fs::canonicalize(path) else {
-            return false;
-        };
-        self.allowed_roots
+    pub fn resolve_allowed_path(&self, path: &Path) -> Result<PathBuf> {
+        let canon = std::fs::canonicalize(path)
+            .with_context(|| format!("canonicalize {}", path.display()))?;
+
+        if !self
+            .allowed_roots
             .iter()
             .any(|root| canon.starts_with(root))
+        {
+            bail!(
+                "path is outside AUTOSUBS_ALLOWED_ROOTS: {}",
+                canon.display()
+            );
+        }
+
+        Ok(canon)
+    }
+
+    pub fn resolve_allowed_file(&self, path: &Path) -> Result<PathBuf> {
+        let canon = self.resolve_allowed_path(path)?;
+
+        if !canon.is_file() {
+            bail!("path is not a file: {}", canon.display());
+        }
+
+        Ok(canon)
+    }
+
+    pub fn resolve_allowed_dir(&self, path: &Path) -> Result<PathBuf> {
+        let canon = self.resolve_allowed_path(path)?;
+
+        if !canon.is_dir() {
+            bail!("path is not a directory: {}", canon.display());
+        }
+
+        Ok(canon)
+    }
+
+    pub fn resolve_allowed_dir_string(&self, value: &str) -> Result<String> {
+        let canon = self.resolve_allowed_dir(Path::new(value))?;
+        canon
+            .to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow::anyhow!("canonical path is not valid UTF-8"))
+    }
+
+    pub fn path_is_allowed(&self, path: &Path) -> bool {
+        self.resolve_allowed_path(path).is_ok()
+    }
+
+    pub fn safe_child(root: &Path, name: &str) -> Result<PathBuf> {
+        if name.is_empty()
+            || name.contains("..")
+            || name.contains('/')
+            || name.contains('\\')
+            || Path::new(name).is_absolute()
+        {
+            bail!("unsafe path component");
+        }
+
+        Ok(root.join(name))
     }
 }
 
@@ -182,5 +242,75 @@ mod tests {
     #[test]
     fn mount_escape_decoder_handles_space() {
         assert_eq!(unescape_mount("/mnt/My\\040Disk"), "/mnt/My Disk");
+    }
+
+    fn security_test_config(root: &Path, allowed: &Path) -> Config {
+        Config {
+            host: "127.0.0.1".into(),
+            port: 3000,
+            config_dir: root.join("config"),
+            data_dir: root.join("data"),
+            fonts_dir: root.join("fonts"),
+            dist_dir: root.join("dist"),
+            allowed_roots: vec![allowed.to_path_buf()],
+            max_render_jobs: 1,
+            max_transcription_jobs: 1,
+            max_queued_jobs: 8,
+            workflow_scan_seconds: 1,
+            file_stability_ms: 250,
+            max_upload_bytes: 1024 * 1024,
+        }
+    }
+
+    #[test]
+    fn allowed_file_resolver_returns_canonical_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let allowed = temp.path().join("allowed");
+        std::fs::create_dir_all(&allowed).unwrap();
+        let input = allowed.join("clip.mp4");
+        std::fs::write(&input, b"video").unwrap();
+
+        let mut config = security_test_config(temp.path(), &allowed);
+        config.init_dirs().unwrap();
+
+        assert_eq!(
+            config.resolve_allowed_file(&input).unwrap(),
+            std::fs::canonicalize(&input).unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn allowed_file_resolver_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let allowed = temp.path().join("allowed");
+        std::fs::create_dir_all(&allowed).unwrap();
+
+        let outside = temp.path().join("outside.mp4");
+        std::fs::write(&outside, b"outside").unwrap();
+
+        let escape = allowed.join("escape.mp4");
+        symlink(&outside, &escape).unwrap();
+
+        let mut config = security_test_config(temp.path(), &allowed);
+        config.init_dirs().unwrap();
+
+        assert!(config.resolve_allowed_file(&escape).is_err());
+    }
+
+    #[test]
+    fn safe_child_rejects_path_components() {
+        let root = Path::new("/data/assets");
+
+        assert_eq!(
+            Config::safe_child(root, "abc-123.png").unwrap(),
+            root.join("abc-123.png")
+        );
+
+        for value in ["", "..", "../evil", "a/b", r"a\b", "foo..bar"] {
+            assert!(Config::safe_child(root, value).is_err(), "{value}");
+        }
     }
 }

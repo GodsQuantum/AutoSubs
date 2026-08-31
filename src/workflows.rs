@@ -3,7 +3,7 @@ use crate::{
     jobs,
     state::AppState,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
     collections::{HashMap, HashSet},
@@ -88,26 +88,22 @@ async fn watch_workflow(
     workflow: Workflow,
     token: CancellationToken,
 ) -> Result<()> {
+    let mut workflow = workflow;
+
+    workflow.watch_dir = state
+        .config
+        .resolve_allowed_dir_string(&workflow.watch_dir)
+        .context("validate workflow watch directory")?;
+    workflow.output_dir = state
+        .config
+        .resolve_allowed_dir_string(&workflow.output_dir)
+        .context("validate workflow output directory")?;
+    workflow.archive_dir = state
+        .config
+        .resolve_allowed_dir_string(&workflow.archive_dir)
+        .context("validate workflow archive directory")?;
+
     let watch_dir = PathBuf::from(&workflow.watch_dir);
-    for (label, configured) in [
-        ("watch", &workflow.watch_dir),
-        ("output", &workflow.output_dir),
-        ("archive", &workflow.archive_dir),
-    ] {
-        let path = PathBuf::from(configured);
-        if !path.is_dir() {
-            return Err(anyhow!(
-                "{label} directory does not exist: {}",
-                path.display()
-            ));
-        }
-        if !state.config.path_is_allowed(&path) {
-            return Err(anyhow!(
-                "{label} directory is outside allowed roots: {}",
-                path.display()
-            ));
-        }
-    }
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PathBuf>();
     let callback_tx = event_tx.clone();
     let mut watcher: Option<RecommendedWatcher> =
