@@ -4,6 +4,7 @@ export type FormatKey = 'source'|'portrait916'|'landscape169'|'square11'|'portra
 export type FitMode = 'preserve'|'contain'|'cover'|'stretch';
 export interface FormatProfile { key: FormatKey; fit: FitMode; width?: number; height?: number }
 export interface SubtitleWord { word:string; start:number; end:number }
+export interface FontFace { id:string; family:string; style:string; weight:number; italic:boolean; fileName:string }
 export interface SubtitleLine { id:number; start:number; end:number; text:string; words?:SubtitleWord[] }
 export type AnimationStyle = 'pop'|'karaoke'|'fade'|'slide-up'|'bounce'|'none';
 export interface Preset {

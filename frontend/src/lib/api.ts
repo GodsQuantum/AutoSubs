@@ -1,4 +1,4 @@
-import type { Asset, Brand, BrowseResponse, Capabilities, Job, Preset, SettingsView, SubtitleLine, Workflow, FormatProfile } from './types';
+import type { Asset, Brand, BrowseResponse, Capabilities, FontFace, Job, Preset, SettingsView, SubtitleLine, Workflow, FormatProfile } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -50,7 +50,8 @@ export const api = {
   uploadAsset: async (file: File) => { const f = new FormData(); f.append('file', file); return request<Asset>('/api/v1/assets', { method: 'POST', body: f }); },
   deleteAsset: (id:string) => request<void>(`/api/v1/assets/${id}`, { method:'DELETE' }),
   browse: (path: string, mode: 'file'|'directory'|'any' = 'any', extensions = '') => request<BrowseResponse>(`/api/v1/browse?path=${encodeURIComponent(path)}&mode=${mode}&extensions=${encodeURIComponent(extensions)}`),
-  capabilities: () => request<Capabilities>('/api/v1/capabilities')
+  capabilities: () => request<Capabilities>('/api/v1/capabilities'),
+  fonts: () => request<FontFace[]>('/api/v1/fonts')
 };
 
 export const subtitleExportUrl = (id:string, format:'srt'|'ass'|'json') => `/api/v1/jobs/${id}/subtitles/${format}`;

@@ -1,10 +1,11 @@
 <script lang="ts">
   import { api } from '$lib/api';
   import { dictionary } from '$lib/i18n';
-  import type { Brand, FormatKey, Preset } from '$lib/types';
+  import type { Brand, FontFace, FormatKey, Preset } from '$lib/types';
   import FormatPreview from '$lib/components/FormatPreview.svelte';
   export let presets:Preset[]=[];
   export let brands:Brand[]=[];
+  export let fonts:FontFace[]=[];
   export let refresh:()=>Promise<void>=async()=>{};
   export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
 
@@ -14,6 +15,7 @@
   let previousFormatKey:FormatKey=draft.format.key;
   let safeZone:SafeZoneKey='generic';
   $: current=presets.find(p=>p.id===selected);
+  $: fontFamilies=[...new Set([draft.fontFamily, ...fonts.map(font=>font.family)].filter(Boolean))];
   $: if(current && draft.id!==current.id) draft=clone(current);
   $: if(draft.format.key!==previousFormatKey){
     previousFormatKey=draft.format.key;
@@ -49,7 +51,7 @@
 
       <div class="grid two">
         <section class="card"><div class="card-header"><strong>{$dictionary.styling}</strong></div><div class="card-body stack">
-          <div class="grid two"><div class="field"><label for="presets-field-7">{$dictionary.animation}</label><select id="presets-field-7" class="select" bind:value={draft.animationStyle}><option value="pop">{$dictionary.pop}</option><option value="karaoke">{$dictionary.karaoke}</option><option value="fade">{$dictionary.fade}</option><option value="slide-up">{$dictionary.slideUp}</option><option value="bounce">{$dictionary.bounce}</option><option value="none">{$dictionary.animationNone}</option></select></div><div class="field"><label for="presets-field-8">{$dictionary.font}</label><input id="presets-field-8" class="input" bind:value={draft.fontFamily}/></div></div>
+          <div class="grid two"><div class="field"><label for="presets-field-7">{$dictionary.animation}</label><select id="presets-field-7" class="select" bind:value={draft.animationStyle}><option value="pop">{$dictionary.pop}</option><option value="karaoke">{$dictionary.karaoke}</option><option value="fade">{$dictionary.fade}</option><option value="slide-up">{$dictionary.slideUp}</option><option value="bounce">{$dictionary.bounce}</option><option value="none">{$dictionary.animationNone}</option></select></div><div class="field"><label for="presets-field-8">{$dictionary.font}</label><select id="presets-field-8" class="select" bind:value={draft.fontFamily}>{#each fontFamilies as family}<option value={family}>{family}</option>{/each}</select></div></div>
           <div class="grid three"><div class="field"><label for="presets-field-9">{$dictionary.baseColor}</label><input id="presets-field-9" class="input" type="color" bind:value={draft.baseColor}/></div><div class="field"><label for="presets-field-10">{$dictionary.highlightColor}</label><input id="presets-field-10" class="input" type="color" bind:value={draft.highlightColor}/></div><div class="field"><label for="presets-field-11">{$dictionary.outlineColor}</label><input id="presets-field-11" class="input" type="color" bind:value={draft.outlineColor}/></div></div>
           <div class="grid two"><div class="field"><label for="presets-field-12">{$dictionary.size}</label><input id="presets-field-12" class="input" type="number" min="8" max="160" bind:value={draft.size}/></div><div class="field"><label for="presets-field-13">{$dictionary.outline}</label><input id="presets-field-13" class="input" type="number" step=".1" min="0" bind:value={draft.outlineThickness}/></div></div>
           <div class="row wrap"><label class="check"><input type="checkbox" bind:checked={draft.bold}/>{$dictionary.bold}</label><label class="check"><input type="checkbox" bind:checked={draft.italic}/>{$dictionary.italic}</label><label class="check"><input type="checkbox" bind:checked={draft.uppercase}/>{$dictionary.uppercase}</label><label class="check"><input type="checkbox" bind:checked={draft.floating}/>{$dictionary.floating}</label></div>

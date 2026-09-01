@@ -1,6 +1,7 @@
 pub mod assets;
 pub mod browse;
 pub mod events;
+pub mod fonts;
 pub mod jobs;
 pub mod media;
 pub mod resources;
@@ -44,6 +45,9 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/capabilities", get(capabilities))
+        .route("/api/v1/fonts", get(fonts::list))
+        .route("/api/v1/fonts/css", get(fonts::stylesheet))
+        .route("/api/v1/fonts/{id}/content", get(fonts::content))
         .route("/api/v1/events", get(events::events))
         .route("/api/v1/jobs", get(jobs::list_jobs))
         .route("/api/v1/jobs/from-path", post(jobs::create_from_path))
