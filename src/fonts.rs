@@ -28,14 +28,19 @@ pub fn scan_fonts(root: &Path) -> Result<Vec<FontFace>> {
 }
 
 pub fn resolve_font_content(root: &Path, id: &str) -> Result<PathBuf> {
-    let relative = decode_id(id)?;
-    let root = fs::canonicalize(root)?;
-    let path = root.join(relative);
-    let canonical = fs::canonicalize(&path)?;
-    if !canonical.starts_with(&root) || !canonical.is_file() || !is_font_file(&canonical) {
-        bail!("font is outside the configured fonts directory")
+    if id.is_empty() || !id.len().is_multiple_of(2) || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        bail!("invalid font id")
     }
-    Ok(canonical)
+
+    let (root, paths) = font_paths(root)?;
+    for path in paths {
+        let relative = path.strip_prefix(&root)?;
+        if font_id(relative) == id {
+            return Ok(path);
+        }
+    }
+
+    bail!("font not found")
 }
 
 pub fn css(fonts: &[FontFace]) -> String {
@@ -61,26 +66,10 @@ fn scan_files<F>(root: &Path, metadata: F) -> Result<Vec<FontFace>>
 where
     F: Fn(&Path) -> Option<(String, String, u16, bool)>,
 {
-    let root = fs::canonicalize(root)?;
-    let mut paths = Vec::new();
-    let mut pending = vec![root.clone()];
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(directory)? {
-            let path = entry?.path();
-            if path.is_dir() {
-                pending.push(path);
-            } else if is_font_file(&path) {
-                paths.push(path);
-            }
-        }
-    }
-    paths.sort();
+    let (root, paths) = font_paths(root)?;
     let mut unique = BTreeMap::new();
-    for path in paths {
-        let canonical = fs::canonicalize(&path)?;
-        if !canonical.starts_with(&root) {
-            continue;
-        }
+
+    for canonical in paths {
         let Some((family, style, weight, italic)) = metadata(&canonical) else {
             continue;
         };
@@ -92,8 +81,10 @@ where
             style.to_ascii_lowercase(),
             weight
         );
+        let relative = canonical.strip_prefix(&root)?;
+
         unique.entry(key).or_insert_with(|| FontFace {
-            id: font_id(canonical.strip_prefix(&root).unwrap()),
+            id: font_id(relative),
             family,
             style,
             weight,
@@ -105,7 +96,41 @@ where
                 .into_owned(),
         });
     }
+
     Ok(unique.into_values().collect())
+}
+
+fn font_paths(root: &Path) -> Result<(PathBuf, Vec<PathBuf>)> {
+    let root = fs::canonicalize(root)?;
+    let mut pending = vec![root.clone()];
+    let mut candidates = Vec::new();
+
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            let path = entry.path();
+
+            if file_type.is_dir() {
+                pending.push(path);
+            } else if file_type.is_file() && is_font_file(&path) {
+                candidates.push(path);
+            }
+        }
+    }
+
+    let mut paths = Vec::new();
+    for path in candidates {
+        let canonical = fs::canonicalize(path)?;
+        if canonical.starts_with(&root) && canonical.is_file() && is_font_file(&canonical) {
+            paths.push(canonical);
+        }
+    }
+
+    paths.sort();
+    paths.dedup();
+
+    Ok((root, paths))
 }
 
 fn metadata(path: &Path) -> Option<(String, String, u16, bool)> {
@@ -174,25 +199,6 @@ fn font_id(relative: &Path) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
-}
-
-fn decode_id(id: &str) -> Result<PathBuf> {
-    if id.is_empty() || !id.len().is_multiple_of(2) || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-        bail!("invalid font id")
-    }
-    let bytes = (0..id.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&id[i..i + 2], 16))
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    let path = PathBuf::from(String::from_utf8(bytes)?);
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|part| matches!(part, std::path::Component::ParentDir))
-    {
-        bail!("invalid font id")
-    }
-    Ok(path)
 }
 
 fn css_escape(value: &str) -> String {

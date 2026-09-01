@@ -99,15 +99,29 @@ pub fn delete_job(state: &AppState, id: &str) -> Result<()> {
     if job.status.is_active() {
         bail!("cannot delete an active job; cancel it first");
     }
+
+    let safe_work_id = Uuid::parse_str(&job.id)
+        .context("stored job id is not a UUID")?
+        .to_string();
+    let work_dir = state.config.work_dir();
+    let work_files = [".wav", "_words.json", ".ass"]
+        .into_iter()
+        .map(|suffix| {
+            crate::config::Config::safe_child(&work_dir, &format!("{safe_work_id}{suffix}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     if let Some((_, token)) = state.job_tokens.remove(id) {
         token.cancel();
     }
     state.jobs.remove(id);
     state.db.delete("job", id)?;
     state.db.delete("job_transcript", id)?;
-    for suffix in [".wav", "_words.json", ".ass"] {
-        let _ = std::fs::remove_file(state.config.work_dir().join(format!("{id}{suffix}")));
+
+    for path in work_files {
+        let _ = std::fs::remove_file(path);
     }
+
     Ok(())
 }
 
@@ -1100,6 +1114,32 @@ mod tests {
         assert!(delete_job(&state, &job.id).is_err());
         cancel_job(&state, &job.id).unwrap();
         delete_job(&state, &job.id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleting_job_rejects_non_uuid_stored_id_before_touching_work_files() {
+        let (_root, state) = test_state().await;
+        let job = create_job(
+            &state,
+            "source.mp4".into(),
+            PathBuf::from("source.mp4"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let mut poisoned = job.clone();
+        state.jobs.remove(&job.id);
+        poisoned.id = "../escape".into();
+        poisoned.status = JobStatus::Ready;
+        state.jobs.insert(poisoned.id.clone(), poisoned);
+
+        let sentinel = state.config.data_dir.join("escape.wav");
+        std::fs::write(&sentinel, b"must survive").unwrap();
+
+        assert!(delete_job(&state, "../escape").is_err());
+        assert!(sentinel.exists());
     }
 
     #[test]

@@ -17,7 +17,7 @@ test('v3.1.0 integration docs expose the shipped version and lifecycle API', asy
   assert.match(frontend, /"version": "3\.1\.0"/);
   assert.match(lock, /"version": "3\.1\.0"/g);
   for (const endpoint of ['/api/v1/fonts', '/api/v1/fonts/css', '/api/v1/jobs/{id}/retranscribe']) {
-    assert.match(readme, new RegExp(endpoint.replace(/[{}]/g, '\\$&')));
+    assert.ok(readme.includes(endpoint), `missing README endpoint: ${endpoint}`);
   }
   assert.match(readme, /GET\/PUT\/DELETE\s+\/api\/v1\/jobs\/\{id\}/);
   for (const topic of ['fonts', 'word timing', 'French segmentation', 'maxLines', 'Split', 'Merge', 'retranscri', 're-render', 'delete', 'animation', 'black bars']) {
