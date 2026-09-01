@@ -6,7 +6,7 @@ export interface FormatProfile { key: FormatKey; fit: FitMode; width?: number; h
 export interface SubtitleWord { word:string; start:number; end:number }
 export interface FontFace { id:string; family:string; style:string; weight:number; italic:boolean; fileName:string }
 export interface SubtitleLine { id:number; start:number; end:number; text:string; words?:SubtitleWord[] }
-export type AnimationStyle = 'pop'|'karaoke'|'fade'|'slide-up'|'bounce'|'none';
+export type AnimationStyle = 'pop'|'highlight'|'karaoke'|'fade'|'slide-up'|'bounce'|'none';
 export interface Preset {
   id:string; name:string; brandId?:string; format:FormatProfile; animationStyle:AnimationStyle; size:number; positionX:number; positionY:number;
   baseColor:string; outlineColor:string; highlightColor:string; fontFamily:string; uppercase:boolean; outlineThickness:number; shadowThickness?:number;

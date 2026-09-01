@@ -42,6 +42,7 @@
   $: locked = job ? ['pending','uploading','probing','transcribing','correcting','rendering'].includes(job.status) : true;
   $: activeLine = lines.findIndex(l=>currentTime>=l.start&&currentTime<l.end);
   $: activeText = activeLine>=0 ? lines[activeLine]?.text ?? '' : '';
+  $: activeWords = activeLine>=0 ? lines[activeLine]?.words : undefined;
   $: currentPreset = presets.find(p=>p.id===selectedPreset);
   $: captionTrackUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(subtitlesToVtt(lines))}`;
   $: if(formatKey!==previousFormatKey){previousFormatKey=formatKey;if(formatKey==='source')fit='preserve';else if(fit==='preserve')fit='cover';}
@@ -84,7 +85,7 @@
     <div class="editor-layout">
       <div class="editor-left">
         <div class="video-stage" style="padding:14px">
-          <FormatPreview format={previewFormat} preset={currentPreset} text={activeText} videoSrc={videoUrl(job.id)} controls={true} videoId="autosubs-editor-video" captionsSrc={captionTrackUrl} {safeZone} onVideoTimeUpdate={(time)=>currentTime=time}/>
+          <FormatPreview format={previewFormat} preset={currentPreset} text={activeText} words={activeWords} currentTime={currentTime} videoSrc={videoUrl(job.id)} controls={true} videoId="autosubs-editor-video" captionsSrc={captionTrackUrl} {safeZone} onVideoTimeUpdate={(time)=>currentTime=time}/>
         </div>
         <div class="row between wrap">
           <div class="resource-meta"><span class="chip">{formatKey==='source'?$dictionary.sourceFormat:formatKey==='portrait916'?'9:16':formatKey==='landscape169'?'16:9':formatKey==='square11'?'1:1':formatKey==='portrait45'?'4:5':`${customWidth}×${customHeight}`}</span><span class="chip">{formatKey==='source'?$dictionary.preserve:fit}</span></div>

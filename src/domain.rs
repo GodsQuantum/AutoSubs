@@ -146,6 +146,7 @@ pub struct SubtitleLine {
 pub enum AnimationStyle {
     #[default]
     Pop,
+    Highlight,
     Karaoke,
     Fade,
     SlideUp,

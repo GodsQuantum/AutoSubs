@@ -132,22 +132,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         let name = format!("autosubs:{}", line.id);
 
         match preset.animation_style {
-            AnimationStyle::Pop => {
+            AnimationStyle::Pop | AnimationStyle::Highlight | AnimationStyle::Bounce => {
                 for active in 0..total_words {
-                    let start = if active == 0 {
-                        line.start
-                    } else {
-                        words.get(active).map(|w| w.start).unwrap_or(line.start)
-                    };
-                    let end = if active + 1 >= total_words {
-                        line.end
-                    } else {
-                        words
-                            .get(active + 1)
-                            .map(|w| w.start)
-                            .unwrap_or(line.end)
-                            .max(start + 0.02)
-                    };
+                    let (start, end) = words
+                        .get(active)
+                        .map(|w| {
+                            (
+                                w.start.max(line.start),
+                                w.end.min(line.end).max(w.start.max(line.start) + 0.001),
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            let duration = (line.end - line.start) / total_words as f64;
+                            (
+                                line.start + active as f64 * duration,
+                                line.start + (active + 1) as f64 * duration,
+                            )
+                        });
                     let float = if preset.floating {
                         float_tags(((end - start) * 1000.0) as i64, preset.wobble_speed)
                     } else {
@@ -165,7 +166,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                             }
                             let token = safe_text(token, preset.uppercase);
                             if global_index == active {
-                                rendered.push_str(&format!("{{\\c{highlight}\\fscx112\\fscy112}}{token}{{\\c{primary}\\fscx100\\fscy100}}"));
+                                let effect = match preset.animation_style {
+                                    AnimationStyle::Highlight => {
+                                        format!("{{\\c{highlight}}}{token}{{\\c{primary}}}")
+                                    }
+                                    AnimationStyle::Bounce => format!(
+                                        "{{\\c{highlight}\\t(0,70,\\fscy125\\fscx105)\\t(70,150,\\fscy100\\fscx100)}}{token}{{\\c{primary}}}"
+                                    ),
+                                    _ => format!(
+                                        "{{\\c{highlight}\\t(0,60,\\fscx112\\fscy112)\\t(60,140,\\fscx100\\fscy100)}}{token}{{\\c{primary}}}"
+                                    ),
+                                };
+                                rendered.push_str(&effect);
                             } else {
                                 rendered.push_str(&token);
                             }
@@ -192,11 +204,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     AnimationStyle::Fade => (
                         format!("{{\\q2\\pos({x},{curr_y})}}"),
                         "{\\fad(150,150)}".to_string(),
-                    ),
-                    AnimationStyle::Bounce => (
-                        format!("{{\\q2\\pos({x},{curr_y})}}"),
-                        "{\\t(0,120,\\fscy125\\fscx105)\\t(120,240,\\fscy100\\fscx100)}"
-                            .to_string(),
                     ),
                     AnimationStyle::SlideUp => (
                         String::new(),
@@ -333,5 +340,53 @@ mod tests {
             "{dialogue}"
         );
         assert_eq!(dialogue.matches("\\N").count(), 1);
+    }
+
+    #[test]
+    fn word_animations_use_word_duration_and_pop_returns_to_base_scale() {
+        let line = SubtitleLine {
+            words: Some(vec![
+                crate::domain::SubtitleWord {
+                    word: "Bonjour".into(),
+                    start: 1.2,
+                    end: 1.35,
+                },
+                crate::domain::SubtitleWord {
+                    word: "monde".into(),
+                    start: 1.6,
+                    end: 1.95,
+                },
+            ]),
+            text: "Bonjour monde".into(),
+            start: 1.0,
+            end: 2.0,
+            ..sample_line()
+        };
+        let ass = generate_ass_content(&[line], &Preset::default(), Some((1920, 1080)));
+        assert!(ass.contains("Dialogue: 0,0:00:01.20,0:00:01.35"));
+        assert!(ass.contains("Dialogue: 0,0:00:01.60,0:00:01.95"));
+        assert!(ass.contains("\\t(0,60,\\fscx112\\fscy112)\\t(60,140,\\fscx100\\fscy100)"));
+    }
+
+    #[test]
+    fn highlight_is_word_level_color_only() {
+        let preset = Preset {
+            animation_style: AnimationStyle::Highlight,
+            ..Preset::default()
+        };
+        let ass = generate_ass_content(&[sample_line()], &preset, Some((1920, 1080)));
+        assert!(ass.contains("\\c&H"));
+        assert!(!ass.contains("\\fscx"));
+    }
+
+    #[test]
+    fn bounce_is_word_level_and_resets_after_a_brief_impulse() {
+        let preset = Preset {
+            animation_style: AnimationStyle::Bounce,
+            ..Preset::default()
+        };
+        let ass = generate_ass_content(&[sample_line()], &preset, Some((1920, 1080)));
+        assert!(ass.contains("\\t(0,70,\\fscy125\\fscx105)\\t(70,150,\\fscy100\\fscx100)"));
+        assert!(ass.matches("Dialogue:").count() >= 2);
     }
 }

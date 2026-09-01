@@ -5,7 +5,9 @@ import {
   formatRatio,
   previewWidthForRatio,
   safeZoneGuide,
-  videoObjectFit
+  videoObjectFit,
+  activeWordIndex,
+  demoSubtitleWords
 } from '../src/lib/preview.js';
 
 test('formatRatio preserves exact standard and custom canvas ratios', () => {
@@ -51,4 +53,24 @@ test('preview keeps explicit subtitle lines without browser wrapping', async () 
   assert.match(source, /white-space:pre-line/);
   assert.match(source, /overflow-wrap:normal/);
   assert.doesNotMatch(source, /overflow-wrap:anywhere/);
+});
+
+test('preview selects the current timed word and deterministic preset demo words', () => {
+  const words = [{ word: 'one', start: 1, end: 1.3 }, { word: 'two', start: 1.4, end: 1.9 }];
+  assert.equal(activeWordIndex(words, 1.2), 0);
+  assert.equal(activeWordIndex(words, 1.5), 1);
+  assert.deepEqual(demoSubtitleWords('ONE TWO').map(({ word, start, end }) => ({ word, start, end })), [
+    { word: 'ONE', start: 0, end: 0.5 }, { word: 'TWO', start: 0.5, end: 1 }
+  ]);
+});
+
+test('preview exposes every animation family and timed-word inputs', async () => {
+  const source = await (await import('node:fs/promises')).readFile(
+    new URL('../src/lib/components/FormatPreview.svelte', import.meta.url), 'utf8'
+  );
+  for (const style of ['pop', 'highlight', 'bounce', 'karaoke', 'fade', 'slide-up', 'none']) {
+    assert.match(source, new RegExp(`animation-${style.replace('-', '\\-')}`));
+  }
+  assert.match(source, /export let words/);
+  assert.match(source, /export let currentTime/);
 });

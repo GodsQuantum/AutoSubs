@@ -503,4 +503,51 @@ mod tests {
                 .contains("anullsrc=r=48000:cl=stereo:d=2.000000[outa]")
         );
     }
+
+    #[test]
+    fn source_preserve_never_geometrically_transforms_primary_video() {
+        for (width, height) in [(1920, 1080), (1080, 1920), (1080, 1080), (1237, 517)] {
+            let mut source = source();
+            source.width = width;
+            source.height = height;
+            let plan = build_render_plan(
+                Path::new("in.mp4"),
+                Path::new("out.mp4"),
+                Path::new("sub.ass"),
+                &Preset::default(),
+                &Encoder::default(),
+                &EncoderCapabilities::default(),
+                &source,
+                None,
+                None,
+            )
+            .unwrap();
+            let joined = plan.args.join(" ");
+            assert!(!joined.contains("scale="), "{width}x{height}: {joined}");
+            assert!(!joined.contains("pad="), "{width}x{height}: {joined}");
+            assert!(!joined.contains("crop="), "{width}x{height}: {joined}");
+            assert_eq!(plan.target_resolution, (width, height));
+        }
+    }
+
+    #[test]
+    fn source_preserve_outro_adapts_only_outro_geometry() {
+        let mut main = source();
+        main.width = 1237;
+        main.height = 517;
+        let plan = build_render_plan(
+            Path::new("in.mp4"),
+            Path::new("out.mp4"),
+            Path::new("sub.ass"),
+            &Preset::default(),
+            &Encoder::default(),
+            &EncoderCapabilities::default(),
+            &main,
+            Some((Path::new("outro.mp4"), &source())),
+            None,
+        )
+        .unwrap();
+        let filter = plan.args.iter().find(|arg| arg.contains("[0:v]")).unwrap();
+        assert!(filter.contains("[0:v]ass='sub.ass'[mainv]"));
+    }
 }

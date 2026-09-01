@@ -62,3 +62,15 @@ export function videoObjectFit(format) {
   if (format?.fit === 'stretch') return 'fill';
   return 'cover';
 }
+
+/** @param {Array<{start:number,end:number}>} words @param {number} time */
+export function activeWordIndex(words, time) {
+  return words.findIndex(word => time >= word.start && time < word.end);
+}
+
+/** @param {string} text */
+export function demoSubtitleWords(text) {
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  const duration = tokens.length ? 1 / tokens.length : 0;
+  return tokens.map((word, index) => ({ word, start: index * duration, end: (index + 1) * duration }));
+}

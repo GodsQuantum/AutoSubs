@@ -1,12 +1,14 @@
 <script lang="ts">
-  import type { FormatProfile, Preset } from '$lib/types';
-  import { clampPreviewPosition, formatRatio, previewWidthForRatio, safeZoneGuide, videoObjectFit } from '$lib/preview.js';
+  import type { FormatProfile, Preset, SubtitleWord } from '$lib/types';
+  import { activeWordIndex, clampPreviewPosition, demoSubtitleWords, formatRatio, previewWidthForRatio, safeZoneGuide, videoObjectFit } from '$lib/preview.js';
 
   type SafeZoneKey = 'off'|'generic'|'tiktok'|'reels'|'shorts';
 
   export let format: FormatProfile;
   export let preset: Preset | undefined = undefined;
   export let text = 'THIS IS A PREVIEW';
+  export let words: SubtitleWord[] | undefined = undefined;
+  export let currentTime = 0;
   export let sourceRatio = 16 / 9;
   export let videoSrc = '';
   export let controls = false;
@@ -28,6 +30,10 @@
   $: outputHeight = format.key === 'portrait916' ? 1920 : format.key === 'landscape169' ? 1080 : format.key === 'square11' ? 1080 : format.key === 'portrait45' ? 1350 : format.key === 'custom' && format.height ? Number(format.height) : naturalHeight || 1080;
   $: displayHeight = previewWidth / ratio;
   $: p = preset;
+  $: previewWords = words?.length ? words : demoSubtitleWords(text);
+  $: previewTime = videoSrc ? currentTime : 0.75;
+  $: activeWord = activeWordIndex(previewWords, previewTime);
+  $: animation = p?.animationStyle ?? 'none';
   $: fontSize = p ? Math.max(10, Math.min(52, p.size * displayHeight / Math.max(1, outputHeight))) : 18;
   $: subtitleStyle = p
     ? `top:${p.positionY}%;left:${p.positionX}%;font-size:${fontSize}px;color:${p.baseColor};font-family:${p.fontFamily},sans-serif;font-weight:${p.bold?800:500};font-style:${p.italic?'italic':'normal'};text-transform:${p.uppercase?'uppercase':'none'};-webkit-text-stroke:${Math.max(0,p.outlineThickness*displayHeight/Math.max(1,outputHeight))}px ${p.outlineColor};text-shadow:0 ${Math.max(1,(p.shadowThickness??1)*displayHeight/Math.max(1,outputHeight))}px ${Math.max(2,(p.shadowThickness??1)*2*displayHeight/Math.max(1,outputHeight))}px ${p.shadowColor??'#000000'};`
@@ -119,7 +125,7 @@
     {#if editable}
       <button
         type="button"
-        class="preview-subtitle editable"
+        class={`preview-subtitle editable animation-${animation}`}
         style={subtitleStyle}
         aria-label="Subtitle position"
         on:pointerdown={startDrag}
@@ -127,9 +133,9 @@
         on:pointerup={stopDrag}
         on:pointercancel={stopDrag}
         on:keydown={nudgePosition}
-      >{text}</button>
+      >{#each previewWords as word, i}{#if i > 0}<span aria-hidden="true"> </span>{/if}<span class:active={i === activeWord} class={`word-animation-${animation}`} style={`color:${i === activeWord && (animation === 'pop' || animation === 'highlight' || animation === 'bounce' || animation === 'karaoke') ? (p?.highlightColor ?? '#3dd7cf') : (p?.baseColor ?? '#fff')}`}>{word.word}</span>{/each}</button>
     {:else}
-      <div class="preview-subtitle" style={subtitleStyle}>{text}</div>
+      <div class={`preview-subtitle animation-${animation}`} style={subtitleStyle}>{#each previewWords as word, i}{#if i > 0}<span aria-hidden="true"> </span>{/if}<span class:active={i === activeWord} class={`word-animation-${animation}`} style={`color:${i === activeWord && (animation === 'pop' || animation === 'highlight' || animation === 'bounce' || animation === 'karaoke') ? (p?.highlightColor ?? '#3dd7cf') : (p?.baseColor ?? '#fff')}`}>{word.word}</span>{/each}</div>
     {/if}
   {/if}
 </div>
@@ -144,6 +150,15 @@
   .preview-subtitle { position:absolute; z-index:6; transform:translate(-50%,-50%); width:max-content; max-width:92%; margin:0; padding:0; border:0; appearance:none; background:transparent; text-align:center; line-height:1.08; white-space:pre-line; overflow-wrap:normal; word-break:normal; pointer-events:none; }
   .preview-subtitle.editable { pointer-events:auto; cursor:grab; touch-action:none; padding:5px 7px; border-radius:6px; outline:1px dashed rgba(61,215,207,.42); }
   .preview-subtitle.editable:active { cursor:grabbing; outline-color:rgba(61,215,207,.9); }
+  .animation-fade { animation: preview-fade 1s ease both; }
+  .animation-slide-up { animation: preview-slide-up .18s ease both; }
+  .word-animation-pop.active { animation: preview-pop .14s ease both; }
+  .word-animation-bounce.active { animation: preview-bounce .15s ease both; }
+  .animation-highlight, .animation-karaoke, .animation-none { animation:none; }
+  @keyframes preview-fade { from { opacity:0; } to { opacity:1; } }
+  @keyframes preview-slide-up { from { opacity:0; transform:translate(-50%,calc(-50% + 18px)); } to { opacity:1; transform:translate(-50%,-50%); } }
+  @keyframes preview-pop { 0% { transform:scale(1); } 43% { transform:scale(1.12); } 100% { transform:scale(1); } }
+  @keyframes preview-bounce { 0% { transform:translateY(0) scale(1); } 45% { transform:translateY(-4px) scale(1.05); } 100% { transform:translateY(0) scale(1); } }
   .safe-risk { position:absolute; z-index:3; pointer-events:none; background:rgba(255,128,125,.08); }
   .safe-risk-top { top:0; left:0; right:0; }
   .safe-risk-bottom { bottom:0; left:0; right:0; }
