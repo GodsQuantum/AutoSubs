@@ -2,6 +2,7 @@
   import { api, subtitleExportUrl, videoUrl } from '$lib/api';
   import { dictionary } from '$lib/i18n';
   import { subtitlesToVtt } from '$lib/captions.js';
+  import { splitSubtitleLine, mergeSubtitleLines, deleteSubtitleLine } from '$lib/subtitle-edit.js';
   import type { FormatKey, FitMode, FormatProfile, Job, Preset, SubtitleLine } from '$lib/types';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import PathPicker from '$lib/components/PathPicker.svelte';
@@ -33,6 +34,7 @@
   let captionTrackUrl='';
   let sidecarPicker=false;
   let fileInput:HTMLInputElement;
+  let textareas:HTMLTextAreaElement[]=[];
   let report:{repairedLineOverlaps:number;retimedWordLines:number;droppedEmptyLines:number}|undefined;
   let previewFormat:FormatProfile={key:'source',fit:'preserve'};
 
@@ -55,6 +57,9 @@
   async function regroup(){if(!job)return;try{lines=await api.regroup(job.id,maxChars,maxLines);dirty=false;await refresh()}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
   function shiftAll(){const d=Number(shiftMs||0)/1000;lines=lines.map(l=>({...l,start:Math.max(0,l.start+d),end:Math.max(.02,l.end+d),words:l.words?.map(w=>({...w,start:Math.max(0,w.start+d),end:Math.max(.02,w.end+d)}))}));dirty=true}
   function replaceText(){if(!search)return; lines=lines.map(l=>({...l,text:l.text.split(search).join(replace)}));dirty=true}
+  function split(i:number){const textarea=textareas[i];lines=splitSubtitleLine(lines,i,textarea?.selectionStart??Math.floor(lines[i].text.length/2));dirty=true}
+  function merge(i:number){lines=mergeSubtitleLines(lines,i);dirty=true}
+  function remove(i:number){lines=deleteSubtitleLine(lines,i);dirty=true}
   async function applyJob():Promise<boolean>{
     if(!job)return false;
     if(formatKey==='custom' && (!Number.isInteger(Number(customWidth))||!Number.isInteger(Number(customHeight))||Number(customWidth)<16||Number(customHeight)<16||Number(customWidth)>16384||Number(customHeight)>16384||Number(customWidth)%2!==0||Number(customHeight)%2!==0)){notify('error',`${$dictionary.custom}: ${$dictionary.width} × ${$dictionary.height}`);return false;}
@@ -101,8 +106,9 @@
                 <div class="subtitle-row" class:active={i===activeLine}>
                   <input class="input mono" type="number" step="0.01" bind:value={line.start} disabled={locked} on:input={mark}/>
                   <input class="input mono" type="number" step="0.01" bind:value={line.end} disabled={locked} on:input={mark}/>
-                  <textarea class="textarea" bind:value={line.text} disabled={locked} on:input={mark}></textarea>
+                  <textarea class="textarea" bind:this={textareas[i]} bind:value={line.text} disabled={locked} on:input={mark}></textarea>
                   <button class="btn icon ghost" on:click={()=>jump(line)} title={$dictionary.jumpToLine}>▶</button>
+                  <div class="row wrap" style="grid-column:2/-1"><button class="btn" disabled={locked} on:click={()=>split(i)}>{$dictionary.split}</button><button class="btn" disabled={locked||i===0} on:click={()=>merge(i-1)}>{$dictionary.mergePrevious}</button><button class="btn" disabled={locked||i===lines.length-1} on:click={()=>merge(i)}>{$dictionary.mergeNext}</button><button class="btn danger" disabled={locked} on:click={()=>remove(i)}>{$dictionary.delete}</button></div>
                 </div>
               {/each}
             </div>

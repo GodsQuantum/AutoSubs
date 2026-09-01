@@ -51,8 +51,8 @@
       serverVideo='';serverSidecar=''; await refresh(); notify('success',$dictionary.prepared);
     } catch(e){notify('error',e instanceof Error?e.message:String(e));}
   }
-  async function action(job:Job, kind:'prepare'|'render'|'cancel') {
-    try { if(kind==='prepare')await api.prepare(job.id); else if(kind==='render')await api.render(job.id); else await api.cancel(job.id); await refresh(); }
+  async function action(job:Job, kind:'prepare'|'render'|'cancel'|'retranscribe'|'delete') {
+    try { if(kind==='prepare')await api.prepare(job.id); else if(kind==='render')await api.render(job.id); else if(kind==='retranscribe')await api.retranscribe(job.id); else if(kind==='delete')await api.deleteJob(job.id); else await api.cancel(job.id); await refresh(); }
     catch(e){notify('error',e instanceof Error?e.message:String(e));}
   }
   const active = (job:Job) => ['pending','uploading','probing','transcribing','correcting','rendering'].includes(job.status);
@@ -96,10 +96,12 @@
           <div><StatusPill status={job.status}/>{#if job.progress!==undefined}<div class="progress" style={`--progress:${job.progress}%;margin-top:7px`}><span></span></div>{/if}</div>
           <div class="job-output muted small">{job.outputPath || job.attachedSidecar || '—'}</div>
           <div class="job-actions">
-            {#if job.status==='ready'||job.status==='done'||job.status==='error'||job.status==='interrupted'}<button class="btn" on:click={()=>openEditor(job.id)}>{$dictionary.edit}</button>{/if}
-            {#if job.status==='ready'}<button class="btn primary" on:click={()=>action(job,'render')}>▶ {$dictionary.render}</button>{/if}
+            {#if !active(job) && job.lines?.length}<button class="btn" on:click={()=>openEditor(job.id)}>{$dictionary.edit}</button>{/if}
+            {#if !active(job) && job.lines?.length}<button class="btn primary" on:click={()=>action(job,'render')}>▶ {job.status==='done'?$dictionary.reRender:$dictionary.render}</button>{/if}
+            {#if ['ready','done','error','cancelled','interrupted'].includes(job.status)}<button class="btn" on:click={()=>action(job,'retranscribe')}>↻ {$dictionary.retranscribe}</button>{/if}
             {#if job.status==='error'||job.status==='cancelled'||job.status==='interrupted'}<button class="btn primary" on:click={()=>action(job,'prepare')}>↻ {$dictionary.retry}</button>{/if}
             {#if active(job)}<button class="btn danger" on:click={()=>action(job,'cancel')}>■ {$dictionary.cancel}</button>{/if}
+            {#if !active(job)}<button class="btn danger" on:click={()=>action(job,'delete')}>× {$dictionary.delete}</button>{/if}
           </div>
           {#if job.error}<div class="small" style="grid-column:1/-1;color:var(--danger)">{job.error}</div>{/if}
         </article>

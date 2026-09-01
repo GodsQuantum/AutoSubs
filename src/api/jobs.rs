@@ -159,6 +159,24 @@ pub async fn cancel(State(state): State<AppState>, Path(id): Path<String>) -> Ap
         .map_err(|_| AppError::NotFound("job not found".into()))
 }
 
+pub async fn retranscribe(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<Json<serde_json::Value>> {
+    jobs::enqueue_retranscribe(state, id).map_err(|error| AppError::Conflict(error.to_string()))?;
+    Ok(Json(json!({"accepted": true})))
+}
+
+pub async fn delete(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<()> {
+    jobs::delete_job(&state, &id).map_err(|error| {
+        if error.to_string().starts_with("job not found") {
+            AppError::NotFound(error.to_string())
+        } else {
+            AppError::Conflict(error.to_string())
+        }
+    })
+}
+
 pub async fn get_subtitles(
     State(state): State<AppState>,
     Path(id): Path<String>,

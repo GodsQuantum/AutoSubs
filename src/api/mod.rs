@@ -53,11 +53,14 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/jobs/from-path", post(jobs::create_from_path))
         .route(
             "/api/v1/jobs/{id}",
-            get(jobs::get_job).put(jobs::update_job_options),
+            get(jobs::get_job)
+                .put(jobs::update_job_options)
+                .delete(jobs::delete),
         )
         .route("/api/v1/jobs/{id}/prepare", post(jobs::prepare))
         .route("/api/v1/jobs/{id}/render", post(jobs::render))
         .route("/api/v1/jobs/{id}/cancel", post(jobs::cancel))
+        .route("/api/v1/jobs/{id}/retranscribe", post(jobs::retranscribe))
         .route(
             "/api/v1/jobs/{id}/subtitles",
             get(jobs::get_subtitles).put(jobs::save_subtitles),

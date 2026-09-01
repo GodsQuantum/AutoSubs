@@ -94,6 +94,23 @@ pub fn get_job(state: &AppState, id: &str) -> Result<Job> {
         .ok_or_else(|| anyhow!("job not found: {id}"))
 }
 
+pub fn delete_job(state: &AppState, id: &str) -> Result<()> {
+    let job = get_job(state, id)?;
+    if job.status.is_active() {
+        bail!("cannot delete an active job; cancel it first");
+    }
+    if let Some((_, token)) = state.job_tokens.remove(id) {
+        token.cancel();
+    }
+    state.jobs.remove(id);
+    state.db.delete("job", id)?;
+    state.db.delete("job_transcript", id)?;
+    for suffix in [".wav", "_words.json", ".ass"] {
+        let _ = std::fs::remove_file(state.config.work_dir().join(format!("{id}{suffix}")));
+    }
+    Ok(())
+}
+
 pub fn cancel_job(state: &AppState, id: &str) -> Result<Job> {
     if let Some(token) = state.job_tokens.get(id) {
         token.cancel();
@@ -123,7 +140,28 @@ pub fn enqueue_prepare(state: AppState, id: String) -> Result<()> {
     let token = fresh_token(&state, &id);
     tokio::spawn(async move {
         let _permit = permit;
-        if let Err(error) = prepare_job(&state, &id, &token).await {
+        if let Err(error) = prepare_job(&state, &id, &token, false).await {
+            finish_error(&state, &id, &token, error);
+        }
+        state.job_tokens.remove(&id);
+    });
+    Ok(())
+}
+
+pub fn enqueue_retranscribe(state: AppState, id: String) -> Result<()> {
+    let job = get_job(&state, &id)?;
+    if job.status.is_active() {
+        bail!("cannot retranscribe an active job");
+    }
+    let permit = state
+        .active_job_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| anyhow!("job queue is full"))?;
+    let token = fresh_token(&state, &id);
+    tokio::spawn(async move {
+        let _permit = permit;
+        if let Err(error) = prepare_job(&state, &id, &token, true).await {
             finish_error(&state, &id, &token, error);
         }
         state.job_tokens.remove(&id);
@@ -141,7 +179,12 @@ async fn cancellable_permit(
     }
 }
 
-async fn prepare_job(state: &AppState, id: &str, token: &CancellationToken) -> Result<()> {
+async fn prepare_job(
+    state: &AppState,
+    id: &str,
+    token: &CancellationToken,
+    force_audio: bool,
+) -> Result<()> {
     let job = get_job(state, id)?;
     let input = job
         .input_path
@@ -174,7 +217,7 @@ async fn prepare_job(state: &AppState, id: &str, token: &CancellationToken) -> R
         job.preset_id.as_deref(),
     )
     .await;
-    let lines = if let Some(sidecar) = job.attached_sidecar.clone() {
+    let lines = if !force_audio && let Some(sidecar) = job.attached_sidecar.clone() {
         load_sidecar(&sidecar, &preset).await?
     } else {
         update_job(state, id, |job| {
@@ -1001,6 +1044,62 @@ mod tests {
         let stored: TranscriptTimeline = state.db.get("job_transcript", &job.id).unwrap().unwrap();
         assert_eq!(stored.timing_quality, TimingQuality::Inferred);
         assert_eq!(stored.words[0].word, "legacy");
+    }
+
+    #[tokio::test]
+    async fn deleting_non_active_job_keeps_media_and_removes_records() {
+        let (root, state) = test_state().await;
+        let input = root.path().join("source.mp4");
+        let output = root.path().join("final.mp4");
+        std::fs::write(&input, b"source").unwrap();
+        std::fs::write(&output, b"output").unwrap();
+        let job = create_job(&state, "source.mp4".into(), input.clone(), None, None, None).unwrap();
+        update_job(&state, &job.id, |job| {
+            job.status = JobStatus::Ready;
+            job.output_path = Some(output.clone());
+        })
+        .unwrap();
+        persist_transcript(
+            &state,
+            &job.id,
+            &TranscriptTimeline {
+                words: vec![],
+                timing_quality: TimingQuality::Inferred,
+            },
+        )
+        .unwrap();
+
+        delete_job(&state, &job.id).unwrap();
+
+        assert!(get_job(&state, &job.id).is_err());
+        assert!(state.db.get::<Job>("job", &job.id).unwrap().is_none());
+        assert!(
+            state
+                .db
+                .get::<TranscriptTimeline>("job_transcript", &job.id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(input.exists());
+        assert!(output.exists());
+    }
+
+    #[tokio::test]
+    async fn deleting_active_job_conflicts_until_cancelled() {
+        let (_root, state) = test_state().await;
+        let job = create_job(
+            &state,
+            "source.mp4".into(),
+            PathBuf::from("source.mp4"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        update_job(&state, &job.id, |job| job.status = JobStatus::Transcribing).unwrap();
+        assert!(delete_job(&state, &job.id).is_err());
+        cancel_job(&state, &job.id).unwrap();
+        delete_job(&state, &job.id).unwrap();
     }
 
     #[test]
