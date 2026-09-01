@@ -18,7 +18,13 @@ pub struct FontFace {
     pub file_name: String,
 }
 
-pub fn scan_fonts(root: &Path) -> Result<Vec<FontFace>> {
+const FONTS_ROOT: &str = "/fonts";
+
+pub fn scan_fonts() -> Result<Vec<FontFace>> {
+    scan_fonts_from(Path::new(FONTS_ROOT))
+}
+
+fn scan_fonts_from(root: &Path) -> Result<Vec<FontFace>> {
     if !root.is_dir() {
         return Ok(Vec::new());
     }
@@ -27,7 +33,11 @@ pub fn scan_fonts(root: &Path) -> Result<Vec<FontFace>> {
     })
 }
 
-pub fn resolve_font_content(root: &Path, id: &str) -> Result<PathBuf> {
+pub fn resolve_font_content(id: &str) -> Result<PathBuf> {
+    resolve_font_content_from(Path::new(FONTS_ROOT), id)
+}
+
+fn resolve_font_content_from(root: &Path, id: &str) -> Result<PathBuf> {
     if id.is_empty() || !id.len().is_multiple_of(2) || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
         bail!("invalid font id")
     }
@@ -239,10 +249,10 @@ mod tests {
         fs::write(root.path().join("safe.ttf"), b"font").unwrap();
         let id = font_id(std::path::Path::new("safe.ttf"));
         assert_eq!(
-            resolve_font_content(root.path(), &id).unwrap(),
+            resolve_font_content_from(root.path(), &id).unwrap(),
             root.path().join("safe.ttf")
         );
-        assert!(resolve_font_content(root.path(), "2e2e2f6576696c2e747466").is_err());
+        assert!(resolve_font_content_from(root.path(), "2e2e2f6576696c2e747466").is_err());
     }
 
     #[test]
@@ -254,6 +264,6 @@ mod tests {
     #[test]
     fn missing_fonts_directory_is_an_empty_catalog() {
         let root = tempfile::tempdir().unwrap().path().join("missing");
-        assert!(scan_fonts(&root).unwrap().is_empty());
+        assert!(scan_fonts_from(&root).unwrap().is_empty());
     }
 }

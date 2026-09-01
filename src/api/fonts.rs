@@ -1,24 +1,21 @@
 use crate::{
     error::{AppError, AppResult},
     fonts::{self, FontFace},
-    state::AppState,
 };
 use axum::{
     Json,
     body::Body,
-    extract::{Path, State},
+    extract::Path,
     http::{Response, header},
 };
 use tokio_util::io::ReaderStream;
 
-pub async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<FontFace>>> {
-    Ok(Json(
-        fonts::scan_fonts(&state.config.fonts_dir).map_err(AppError::Internal)?,
-    ))
+pub async fn list() -> AppResult<Json<Vec<FontFace>>> {
+    Ok(Json(fonts::scan_fonts().map_err(AppError::Internal)?))
 }
 
-pub async fn stylesheet(State(state): State<AppState>) -> AppResult<Response<Body>> {
-    let catalog = fonts::scan_fonts(&state.config.fonts_dir).map_err(AppError::Internal)?;
+pub async fn stylesheet() -> AppResult<Response<Body>> {
+    let catalog = fonts::scan_fonts().map_err(AppError::Internal)?;
     Response::builder()
         .header(header::CONTENT_TYPE, "text/css; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-cache")
@@ -26,11 +23,8 @@ pub async fn stylesheet(State(state): State<AppState>) -> AppResult<Response<Bod
         .map_err(|error| AppError::Internal(error.into()))
 }
 
-pub async fn content(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> AppResult<Response<Body>> {
-    let path = fonts::resolve_font_content(&state.config.fonts_dir, &id)
+pub async fn content(Path(id): Path<String>) -> AppResult<Response<Body>> {
+    let path = fonts::resolve_font_content(&id)
         .map_err(|_| AppError::NotFound("font not found".into()))?;
     let file = tokio::fs::File::open(&path)
         .await
