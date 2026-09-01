@@ -115,6 +115,21 @@ pub struct SubtitleWord {
     pub end: f64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TimingQuality {
+    Exact,
+    Inferred,
+    Aligned,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptTimeline {
+    pub words: Vec<SubtitleWord>,
+    pub timing_quality: TimingQuality,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SubtitleLine {

@@ -1,6 +1,6 @@
 use crate::domain::{
-    Asset, Brand, EncoderKind, Job, JobStatus, Preset, RawWord, SubtitleLine,
-    TranscriptionResponse, Workflow,
+    Asset, Brand, EncoderKind, Job, JobStatus, Preset, RawWord, SubtitleLine, TimingQuality,
+    TranscriptTimeline, TranscriptionResponse, Workflow,
 };
 use crate::media::process::ProcessError;
 use crate::media::transcribe::{TranscriptionError, extract_audio, transcribe_audio};
@@ -12,6 +12,7 @@ use crate::subtitle::{
     group_transcription_into_lines,
     llm::correct_lines,
     normalize_subtitles,
+    segment::transcript_timeline,
     srt::{generate_srt_content, parse_ass_to_lines, parse_srt_to_lines},
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -192,6 +193,7 @@ async fn prepare_job(state: &AppState, id: &str, token: &CancellationToken) -> R
             Err(TranscriptionError::Cancelled) => bail!("cancelled"),
             Err(e) => return Err(e.into()),
         };
+        persist_transcript(state, id, &transcript_timeline(&transcription))?;
         let raw_path = state.config.work_dir().join(format!("{id}_words.json"));
         tokio::fs::write(&raw_path, serde_json::to_vec_pretty(&transcription)?).await?;
         let lines =
@@ -480,6 +482,10 @@ pub fn save_subtitles(
     Ok(report)
 }
 
+pub fn persist_transcript(state: &AppState, id: &str, timeline: &TranscriptTimeline) -> Result<()> {
+    state.db.upsert("job_transcript", id, timeline)
+}
+
 pub fn regroup_subtitles(
     state: &AppState,
     id: &str,
@@ -487,25 +493,44 @@ pub fn regroup_subtitles(
     max_lines: u32,
 ) -> Result<Vec<SubtitleLine>> {
     let job = get_job(state, id)?;
-    let words = job
-        .lines
-        .as_ref()
-        .into_iter()
-        .flatten()
-        .flat_map(|line| line.words.clone().unwrap_or_default())
-        .map(|w| RawWord {
-            word: Some(w.word),
-            start: Some(w.start),
-            end: Some(w.end),
-        })
-        .collect::<Vec<_>>();
-    if words.is_empty() {
+    let timeline =
+        if let Some(timeline) = state.db.get::<TranscriptTimeline>("job_transcript", id)? {
+            timeline
+        } else {
+            let words = job
+                .lines
+                .as_ref()
+                .into_iter()
+                .flatten()
+                .flat_map(|line| line.words.clone().unwrap_or_default())
+                .collect::<Vec<_>>();
+            if words.is_empty() {
+                bail!("job has no word timing to regroup");
+            }
+            let timeline = TranscriptTimeline {
+                words,
+                timing_quality: TimingQuality::Inferred,
+            };
+            persist_transcript(state, id, &timeline)?;
+            timeline
+        };
+    if timeline.words.is_empty() {
         bail!("job has no word timing to regroup");
     }
     let lines = group_transcription_into_lines(
         &TranscriptionResponse {
             text: None,
-            words: Some(words),
+            words: Some(
+                timeline
+                    .words
+                    .into_iter()
+                    .map(|w| RawWord {
+                        word: Some(w.word),
+                        start: Some(w.start),
+                        end: Some(w.end),
+                    })
+                    .collect(),
+            ),
             segments: None,
         },
         max_chars,
@@ -862,6 +887,109 @@ pub fn error_is_cancelled(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn test_state() -> (tempfile::TempDir, AppState) {
+        let root = tempfile::tempdir().unwrap();
+        let config = crate::config::Config {
+            host: "127.0.0.1".into(),
+            port: 0,
+            config_dir: root.path().join("config"),
+            data_dir: root.path().join("data"),
+            fonts_dir: root.path().join("fonts"),
+            dist_dir: root.path().join("frontend"),
+            allowed_roots: Vec::new(),
+            max_render_jobs: 1,
+            max_transcription_jobs: 1,
+            max_queued_jobs: 2,
+            workflow_scan_seconds: 5,
+            file_stability_ms: 10,
+            max_upload_bytes: 1024,
+        };
+        (root, AppState::load(config).await.unwrap())
+    }
+
+    #[tokio::test]
+    async fn regroup_prefers_canonical_timeline_after_visual_edit() {
+        let (_root, state) = test_state().await;
+        let job = create_job(
+            &state,
+            "clip.mp4".into(),
+            PathBuf::from("clip.mp4"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        update_job(&state, &job.id, |job| job.status = JobStatus::Ready).unwrap();
+        let mut edited = SubtitleLine {
+            id: 0,
+            start: 0.0,
+            end: 2.0,
+            text: "edited layout".into(),
+            words: None,
+        };
+        edited.words = Some(vec![
+            crate::domain::SubtitleWord {
+                word: "edited".into(),
+                start: 0.0,
+                end: 1.0,
+            },
+            crate::domain::SubtitleWord {
+                word: "layout".into(),
+                start: 1.0,
+                end: 2.0,
+            },
+        ]);
+        update_job(&state, &job.id, |job| job.lines = Some(vec![edited])).unwrap();
+        persist_transcript(
+            &state,
+            &job.id,
+            &TranscriptTimeline {
+                words: vec![crate::domain::SubtitleWord {
+                    word: "canonical".into(),
+                    start: 4.0,
+                    end: 5.0,
+                }],
+                timing_quality: TimingQuality::Exact,
+            },
+        )
+        .unwrap();
+        let regrouped = regroup_subtitles(&state, &job.id, 25, 2).unwrap();
+        assert_eq!(regrouped[0].text, "canonical");
+        assert_eq!((regrouped[0].start, regrouped[0].end), (4.0, 5.0));
+    }
+
+    #[tokio::test]
+    async fn regroup_legacy_lines_are_migrated_to_canonical_timeline() {
+        let (_root, state) = test_state().await;
+        let job = create_job(
+            &state,
+            "clip.mp4".into(),
+            PathBuf::from("clip.mp4"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        update_job(&state, &job.id, |job| job.status = JobStatus::Ready).unwrap();
+        let line = SubtitleLine {
+            id: 0,
+            start: 2.0,
+            end: 3.0,
+            text: "legacy".into(),
+            words: Some(vec![crate::domain::SubtitleWord {
+                word: "legacy".into(),
+                start: 2.0,
+                end: 3.0,
+            }]),
+        };
+        update_job(&state, &job.id, |job| job.lines = Some(vec![line])).unwrap();
+        regroup_subtitles(&state, &job.id, 25, 2).unwrap();
+        let stored: TranscriptTimeline = state.db.get("job_transcript", &job.id).unwrap().unwrap();
+        assert_eq!(stored.timing_quality, TimingQuality::Inferred);
+        assert_eq!(stored.words[0].word, "legacy");
+    }
+
     #[test]
     fn json_companion_accepts_line_array() {
         let data = br#"[{"id":0,"start":0.0,"end":1.0,"text":"hello"}]"#;

@@ -1,4 +1,6 @@
-use crate::domain::{RawWord, SubtitleLine, SubtitleWord, TranscriptionResponse};
+use crate::domain::{
+    RawWord, SubtitleLine, SubtitleWord, TimingQuality, TranscriptTimeline, TranscriptionResponse,
+};
 use crate::subtitle::normalize::{NormalizeOptions, normalize_subtitles};
 use regex::Regex;
 use std::collections::HashMap;
@@ -144,16 +146,24 @@ fn fix_tokenization(words: Vec<SubtitleWord>) -> Vec<SubtitleWord> {
 }
 
 fn raw_words(transcription: &TranscriptionResponse) -> Vec<SubtitleWord> {
+    let (words, _) = raw_words_with_quality(transcription);
+    fix_tokenization(words)
+}
+
+fn raw_words_with_quality(
+    transcription: &TranscriptionResponse,
+) -> (Vec<SubtitleWord>, TimingQuality) {
     let mut result = Vec::new();
+    let mut exact = true;
     if let Some(words) = &transcription.words {
-        append_raw_words(&mut result, words);
+        append_raw_words(&mut result, words, &mut exact);
     }
     if result.is_empty()
         && let Some(segments) = &transcription.segments
     {
         for segment in segments {
             if let Some(words) = &segment.words {
-                append_raw_words(&mut result, words);
+                append_raw_words(&mut result, words, &mut exact);
                 continue;
             }
             if let Some(text) = &segment.text {
@@ -166,6 +176,7 @@ fn raw_words(transcription: &TranscriptionResponse) -> Vec<SubtitleWord> {
                 let total: usize = tokens.iter().map(|v| grapheme_len(v).max(1)).sum();
                 let mut cursor = start;
                 for (idx, token) in tokens.iter().enumerate() {
+                    exact = false;
                     let duration =
                         (end - start) * (grapheme_len(token).max(1) as f64 / total as f64);
                     let token_end = if idx == tokens.len() - 1 {
@@ -188,6 +199,7 @@ fn raw_words(transcription: &TranscriptionResponse) -> Vec<SubtitleWord> {
     {
         let mut cursor = 0.0;
         for token in text.split_whitespace() {
+            exact = false;
             result.push(SubtitleWord {
                 word: token.into(),
                 start: cursor,
@@ -196,17 +208,30 @@ fn raw_words(transcription: &TranscriptionResponse) -> Vec<SubtitleWord> {
             cursor += 0.4;
         }
     }
-    fix_tokenization(result)
+    let quality = if exact && !result.is_empty() {
+        TimingQuality::Exact
+    } else {
+        TimingQuality::Inferred
+    };
+    (result, quality)
 }
 
-fn append_raw_words(out: &mut Vec<SubtitleWord>, words: &[RawWord]) {
+fn append_raw_words(out: &mut Vec<SubtitleWord>, words: &[RawWord], exact: &mut bool) {
     for word in words {
         let text = word.word.as_deref().unwrap_or("").trim();
         if text.is_empty() {
             continue;
         }
-        let start = word.start.unwrap_or(0.0).max(0.0);
-        let end = word.end.unwrap_or(start + 0.04).max(start + 0.02);
+        let (start, end) = match (word.start, word.end) {
+            (Some(start), Some(end)) if start.is_finite() && end.is_finite() && end >= start => {
+                (start, end)
+            }
+            _ => {
+                *exact = false;
+                let start = word.start.unwrap_or(0.0).max(0.0);
+                (start, word.end.unwrap_or(start + 0.04).max(start + 0.02))
+            }
+        };
         out.push(SubtitleWord {
             word: text.into(),
             start,
@@ -383,6 +408,14 @@ pub fn group_transcription_into_lines(
     normalize_subtitles(&blocks, NormalizeOptions::default()).lines
 }
 
+pub fn transcript_timeline(transcription: &TranscriptionResponse) -> TranscriptTimeline {
+    let (words, timing_quality) = raw_words_with_quality(transcription);
+    TranscriptTimeline {
+        words,
+        timing_quality,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,6 +458,19 @@ mod tests {
                 "not protected: {token}"
             );
         }
+    }
+
+    #[test]
+    fn exact_transcription_timeline_round_trips_without_changing_timestamps() {
+        let input = transcription(&[("hello", 0.123456789, 0.234567891)]);
+        let timeline = transcript_timeline(&input);
+        assert_eq!(timeline.timing_quality, TimingQuality::Exact);
+        assert_eq!(timeline.words[0].start, 0.123456789);
+        assert_eq!(timeline.words[0].end, 0.234567891);
+        assert_eq!(
+            serde_json::to_value(&timeline).unwrap()["words"][0]["start"],
+            serde_json::json!(0.123456789)
+        );
     }
 
     #[test]

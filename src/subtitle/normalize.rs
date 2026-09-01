@@ -133,20 +133,45 @@ fn normalize_words(line: &SubtitleLine, configured_min_word: f64) -> (Vec<Subtit
             .iter()
             .all(|word| word.start.is_finite() && word.end.is_finite())
     {
+        if existing
+            .first()
+            .is_some_and(|word| word.start >= line.start)
+            && existing
+                .iter()
+                .all(|word| word.end <= line.end && word.end > word.start)
+            && existing.windows(2).all(|pair| pair[1].start >= pair[0].end)
+        {
+            return (
+                tokens
+                    .iter()
+                    .zip(existing)
+                    .map(|(token, old)| SubtitleWord {
+                        word: (*token).to_string(),
+                        start: old.start,
+                        end: old.end,
+                    })
+                    .collect(),
+                existing
+                    .iter()
+                    .zip(tokens)
+                    .any(|(old, token)| old.word != *token),
+            );
+        }
         let mut result = Vec::with_capacity(n);
-        let mut previous_end = line.start;
         let mut changed = false;
 
+        let mut previous_end = line.start;
         for (i, (token, old)) in tokens.iter().zip(existing.iter()).enumerate() {
             let remaining = n - i - 1;
-            let latest_start = (line.end - min_word * (remaining as f64 + 1.0)).max(previous_end);
-            let desired_start = if i == 0 { line.start } else { old.start };
-            let start = desired_start.clamp(previous_end, latest_start);
+            let latest_start = (line.end - min_word * (remaining as f64 + 1.0))
+                .max(previous_end)
+                .min((line.end - min_word).max(previous_end));
+            let start = old.start.clamp(previous_end, latest_start);
             let latest_end = (line.end - min_word * remaining as f64).max(start + min_word);
             let end = if i == n - 1 {
                 line.end
             } else {
-                old.end.clamp(start + min_word, latest_end)
+                old.end.max(start + min_word).min(latest_end)
             };
             if (start - old.start).abs() > 1e-6
                 || (end - old.end).abs() > 1e-6
@@ -162,6 +187,78 @@ fn normalize_words(line: &SubtitleLine, configured_min_word: f64) -> (Vec<Subtit
             previous_end = end;
         }
         return (result, changed);
+    }
+
+    if let Some(existing) = &line.words
+        && existing
+            .iter()
+            .all(|word| word.start.is_finite() && word.end.is_finite())
+    {
+        let mut matches = vec![None; n];
+        let mut old_index = 0;
+        for (target_index, token) in tokens.iter().enumerate() {
+            if let Some(index) =
+                (old_index..existing.len()).find(|&index| same_token(token, &existing[index].word))
+            {
+                matches[target_index] = Some(index);
+                old_index = index + 1;
+            }
+        }
+        let alignment_feasible = (0..n).filter(|&i| matches[i].is_none()).all(|i| {
+            let left = (0..i)
+                .rev()
+                .find_map(|j| matches[j].map(|old| existing[old].end))
+                .unwrap_or(line.start);
+            let right = (i + 1..n)
+                .find_map(|j| matches[j].map(|old| existing[old].start))
+                .unwrap_or(line.end);
+            right > left + f64::EPSILON
+        });
+        if matches.iter().any(Option::is_some) && alignment_feasible {
+            let mut result = vec![None; n];
+            for (index, old) in matches
+                .iter()
+                .enumerate()
+                .filter_map(|(i, old)| old.map(|j| (i, &existing[j])))
+            {
+                result[index] = Some(SubtitleWord {
+                    word: tokens[index].to_string(),
+                    start: old.start,
+                    end: old.end,
+                });
+            }
+            let mut run_start = 0;
+            while run_start < n {
+                if result[run_start].is_some() {
+                    run_start += 1;
+                    continue;
+                }
+                let run_end = (run_start..n).find(|&i| result[i].is_some()).unwrap_or(n);
+                let left = if run_start == 0 {
+                    line.start
+                } else {
+                    result[run_start - 1].as_ref().unwrap().end
+                };
+                let right = if run_end == n {
+                    line.end
+                } else {
+                    result[run_end].as_ref().unwrap().start
+                };
+                let span = (right - left).max(f64::EPSILON);
+                for index in run_start..run_end {
+                    let a = left + span * (index - run_start) as f64 / (run_end - run_start) as f64;
+                    let b =
+                        left + span * (index - run_start + 1) as f64 / (run_end - run_start) as f64;
+                    result[index] = Some(SubtitleWord {
+                        word: tokens[index].to_string(),
+                        start: a,
+                        end: b.min(line.end),
+                    });
+                }
+                run_start = run_end;
+            }
+            return (result.into_iter().map(Option::unwrap).collect(), true);
+        }
     }
 
     let weights: Vec<usize> = tokens
@@ -190,6 +287,11 @@ fn normalize_words(line: &SubtitleLine, configured_min_word: f64) -> (Vec<Subtit
         cursor = result.last().map(|w| w.end).unwrap_or(cursor);
     }
     (result, true)
+}
+
+fn same_token(left: &str, right: &str) -> bool {
+    left.trim_matches(|c: char| c.is_ascii_punctuation())
+        .eq_ignore_ascii_case(right.trim_matches(|c: char| c.is_ascii_punctuation()))
 }
 
 #[cfg(test)]
@@ -304,6 +406,56 @@ mod tests {
         assert_eq!(result.retimed_word_lines, 1);
         assert_eq!(result.lines[0].words.as_ref().unwrap().len(), 5);
         assert_invariants(&result.lines, options);
+    }
+
+    #[test]
+    fn same_count_correction_preserves_exact_word_times() {
+        let mut edited = line(0, 0.0, 2.0, "bonjour monde");
+        edited.words = Some(vec![
+            SubtitleWord {
+                word: "bonjour".into(),
+                start: 0.25,
+                end: 0.75,
+            },
+            SubtitleWord {
+                word: "monde".into(),
+                start: 1.25,
+                end: 1.75,
+            },
+        ]);
+        edited.text = "bonsoir monde".into();
+        let result = normalize_subtitles(&[edited], NormalizeOptions::default());
+        let words = result.lines[0].words.as_ref().unwrap();
+        assert_eq!((words[0].start, words[0].end), (0.25, 0.75));
+        assert_eq!((words[1].start, words[1].end), (1.25, 1.75));
+    }
+
+    #[test]
+    fn insertion_preserves_matching_surrounding_word_times() {
+        let mut edited = line(0, 0.0, 3.0, "one new two three");
+        edited.words = Some(vec![
+            SubtitleWord {
+                word: "one".into(),
+                start: 0.1,
+                end: 0.4,
+            },
+            SubtitleWord {
+                word: "two".into(),
+                start: 1.0,
+                end: 1.4,
+            },
+            SubtitleWord {
+                word: "three".into(),
+                start: 2.0,
+                end: 2.4,
+            },
+        ]);
+        let result = normalize_subtitles(&[edited], NormalizeOptions::default());
+        let words = result.lines[0].words.as_ref().unwrap();
+        assert_eq!(words[0].start, 0.1);
+        assert_eq!(words[2].start, 1.0);
+        assert_eq!(words[3].start, 2.0);
+        assert!(words[1].start >= words[0].end && words[1].end <= words[2].start);
     }
 
     #[test]
