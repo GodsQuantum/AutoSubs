@@ -4,6 +4,21 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-01
+
+### Added
+
+- Custom fonts are discovered recursively from `AUTOSUBS_FONTS_DIR`, exposed to browser previews, and available to libass.
+- Canonical word timing is durable across regrouping and visual text edits.
+- French-aware segmentation and hard `maxLines` enforcement keep rendered captions within their configured visual line limit.
+- Editor actions restore Split, Merge previous/next, and Delete subtitle block.
+- Existing jobs can be retranscribed or re-rendered; jobs can be deleted without removing source media or final output.
+
+### Fixed
+
+- Corrected Pop, Highlight, Bounce, Karaoke, Fade, Slide-up, and None animations to use consistent timed-word or block semantics in preview and ASS output.
+- Source format with Preserve never adds black bars: the primary source geometry is not scaled, padded, or cropped.
+
 ## [3.0.1] - 2026-08-31
 
 ### Security

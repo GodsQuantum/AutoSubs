@@ -47,7 +47,11 @@ Le navigateur n'est pas le moteur métier. Rust possède la normalisation des ti
 - **Correction LLM optionnelle** — orthographe et ponctuation sans laisser le modèle modifier directement les timings.
 - **Un seul moteur de timing** — Rust répare plages invalides, chevauchements, gaps et timings de mots. Le frontend ne possède pas une deuxième implémentation divergente.
 - **Découpage Unicode/français** — comptage par graphèmes, opportunités Unicode et règles de non-coupure françaises.
-- **Styles ASS/libass** — Pop, Karaoké, Fondu, Rebond, Slide-up, Floating ou aucun effet; polices, contour, ombre, position et couleur d'accent.
+- **Styles ASS/libass** — Pop, Surbrillance, Rebond, Karaoké, Fondu, Slide-up ou aucun effet; polices, contour, ombre, position et couleur d'accent.
+- **Timings mot-à-mot durables** — la timeline canonique survit aux regroupements et modifications visuelles ; les animations utilisent les timings originaux.
+- **Mise en page française** — segmentation syntaxique française et `maxLines` strict garantissent des retours explicites sans ligne cachée supplémentaire.
+- **Cycle de vie complet** — édition, scission, fusion, suppression, retranscription et rerendu depuis la file et l'éditeur. Supprimer un job conserve la source et la sortie finale.
+- **Invariant Source** — Source + Conserver préserve la géométrie primaire sans scale, pad, crop ni bandes noires.
 - **Formats réels** — Source, 9:16, 16:9, 1:1, 4:5 et custom. La géométrie source est préservée par défaut ; `contain`, `cover` et `stretch` sont explicites.
 - **Brands / Marques** — logo, outro et preset par défaut selon le format.
 - **Workflows** — dossiers watch/output/archive indépendants, résolution Brand/preset, événements natifs + réconciliation périodique pour les montages NFS.
@@ -118,10 +122,10 @@ volumes:
 3. La correction LLM optionnelle ne touche qu'au texte.
 4. Le moteur Rust normalise timings et regroupement.
 5. Le job arrive à **Prêt**. Aucun encodage vidéo n'a encore été dépensé si le rendu immédiat n'a pas été demandé.
-6. Corrige/recherche/remplace/regroupe/décale dans l'Éditeur.
+6. Corrige/scinde/fusionne/supprime/recherche/remplace/regroupe/décale dans l'Éditeur ; la timeline canonique reste disponible pour les regroupements ultérieurs.
 7. Exporte SRT/ASS/JSON sans réencoder, ou lance **Rendre la vidéo**.
 8. FFmpeg/libass écrit d'abord un staging `.partial`. `.partial` est strictement interne au média incomplet, jamais un format de sous-titres.
-9. Vidéo et sidecars sont publiés ensemble ; l'archive éventuelle de la source arrive en dernier.
+9. Vidéo et sidecars sont publiés ensemble ; l'archive éventuelle de la source arrive en dernier. Les jobs existants peuvent être retranscrits ou rerendus depuis la file.
 
 Cette étape **Prêt** évite de relancer un encode complet simplement pour corriger trois mots.
 
@@ -183,7 +187,7 @@ Les clés fournisseur peuvent être initialisées par environnement ou configur�
 
 ## API
 
-L'API actuelle vit sous `/api/v1` : jobs, Range media streaming, annulation/rendu, sidecars, édition/regroupement/shift/export, uploads tus, presets, marques, workflows, settings, picker de fichiers et assets. Voir la liste détaillée dans le [README anglais](README.md#api).
+L'API actuelle vit sous `/api/v1` : jobs, suppression sans suppression des médias, retranscription/rerendu, streaming Range, annulation, sidecars, édition/regroupement/shift/export, uploads tus, catalogue de polices (`/fonts`, `/fonts/css`, `/fonts/{id}/content`), presets, marques, workflows, settings, picker de fichiers et assets. Voir la liste détaillée dans le [README anglais](README.md#api).
 
 Le picker canonicalise les chemins après résolution des symlinks et refuse toute sortie hors de `AUTOSUBS_ALLOWED_ROOTS`.
 
