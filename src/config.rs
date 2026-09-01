@@ -13,7 +13,7 @@ pub struct Config {
     pub config_dir: PathBuf,
     #[arg(long, env = "AUTOSUBS_DATA_DIR", default_value = "/data")]
     pub data_dir: PathBuf,
-    #[arg(long, env = "AUTOSUBS_FONTS_DIR", default_value = "/fonts")]
+    #[arg(skip = PathBuf::from("/fonts"))]
     pub fonts_dir: PathBuf,
     #[arg(long, env = "AUTOSUBS_DIST_DIR", default_value = "/app/frontend")]
     pub dist_dir: PathBuf,
@@ -43,11 +43,6 @@ impl Config {
             && std::env::var_os("AUTOSUBS_DATA_DIR").is_none()
         {
             self.data_dir = PathBuf::from(value);
-        }
-        if let Ok(value) = std::env::var("FONTS_DIR")
-            && std::env::var_os("AUTOSUBS_FONTS_DIR").is_none()
-        {
-            self.fonts_dir = PathBuf::from(value);
         }
         if let Ok(value) = std::env::var("MAX_ENCODE_JOBS")
             && std::env::var_os("AUTOSUBS_MAX_RENDER_JOBS").is_none()
@@ -239,6 +234,21 @@ pub fn ensure_sqlite_local(config_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fonts_dir_is_fixed_internal_mount() {
+        let config = <Config as clap::Parser>::try_parse_from(["autosubs"]).unwrap();
+        assert_eq!(config.fonts_dir, PathBuf::from("/fonts"));
+
+        assert!(
+            <Config as clap::Parser>::try_parse_from([
+                "autosubs",
+                "--fonts-dir",
+                "/tmp/untrusted-fonts",
+            ])
+            .is_err()
+        );
+    }
+
     #[test]
     fn mount_escape_decoder_handles_space() {
         assert_eq!(unescape_mount("/mnt/My\\040Disk"), "/mnt/My Disk");

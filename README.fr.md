@@ -97,7 +97,7 @@ Les variables ont été renommées pour éviter les ambiguïtés :
 
 ```text
 DATA_DIR         → AUTOSUBS_DATA_DIR=/data
-FONTS_DIR        → AUTOSUBS_FONTS_DIR=/fonts
+FONTS_DIR        → supprimée : monte le dossier de polices hôte sur /fonts
 DIST_DIR         → supprimée : l'UI est intégrée directement à l'image
 MAX_ENCODE_JOBS  → AUTOSUBS_MAX_RENDER_JOBS
 SPEACHES_URL     → AUTOSUBS_LOCAL_TRANSCRIPTION_URL
@@ -167,12 +167,13 @@ Le mode `auto` reste volontairement simple : si l'encodeur matériel choisi ne d
 
 ## ⚙️ Configuration
 
+> **Polices personnalisées :** `/fonts` est une frontière de confiance interne fixe. Monte n'importe quel dossier de polices de l'hôte vers `/fonts` (lecture seule possible) ; le chemin interne n'est volontairement plus configurable.
+
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `AUTOSUBS_PORT` | `3000` | Port HTTP interne. |
 | `AUTOSUBS_CONFIG_DIR` | `/config` | Dossier local SQLite/config. |
 | `AUTOSUBS_DATA_DIR` | `/data` | Données uploads/jobs/renders. |
-| `AUTOSUBS_FONTS_DIR` | `/fonts` | Polices custom. |
 | `AUTOSUBS_ALLOWED_ROOTS` | `/data:/media` dans l'image | Racines visibles par le picker/workflows. Hors Docker, si la variable est absente, AutoSubs utilise son dossier data. |
 | `AUTOSUBS_MAX_RENDER_JOBS` | `2` | Encodages lourds simultanés. |
 | `AUTOSUBS_MAX_TRANSCRIPTION_JOBS` | `2` | Transcriptions simultanées. |

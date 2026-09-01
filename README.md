@@ -111,7 +111,6 @@ services:
       TZ: UTC
       AUTOSUBS_CONFIG_DIR: /config
       AUTOSUBS_DATA_DIR: /data
-      AUTOSUBS_FONTS_DIR: /fonts
       AUTOSUBS_ALLOWED_ROOTS: /data:/srv/media
       AUTOSUBS_MAX_RENDER_JOBS: "2"
       AUTOSUBS_MAX_TRANSCRIPTION_JOBS: "2"
@@ -182,12 +181,13 @@ For Intel/AMD Linux acceleration, expose `/dev/dri` to the container and add the
 
 Core runtime variables:
 
+> **Custom fonts:** `/fonts` is a fixed internal trust boundary. Mount any host font directory to `/fonts` (read-only is fine); the internal font path is intentionally not configurable at runtime.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `AUTOSUBS_PORT` | `3000` | HTTP port inside the container. |
 | `AUTOSUBS_CONFIG_DIR` | `/config` | Local SQLite/config directory. |
 | `AUTOSUBS_DATA_DIR` | `/data` | Upload/job/render working data. |
-| `AUTOSUBS_FONTS_DIR` | `/fonts` | Custom font directory. |
 | `AUTOSUBS_ALLOWED_ROOTS` | `/data:/media` in the image | Colon-separated roots exposed by the server picker/workflows. If omitted outside Docker, AutoSubs falls back to its data directory. |
 | `AUTOSUBS_MAX_RENDER_JOBS` | `2` | Concurrent expensive render slots. |
 | `AUTOSUBS_MAX_TRANSCRIPTION_JOBS` | `2` | Concurrent transcription slots. |
