@@ -43,3 +43,12 @@ test('clampPreviewPosition keeps drag coordinates inside the canvas', () => {
   assert.deepEqual(clampPreviewPosition(-12, 140), { x: 0, y: 100 });
   assert.deepEqual(clampPreviewPosition(42.5, 67), { x: 42.5, y: 67 });
 });
+
+test('preview keeps explicit subtitle lines without browser wrapping', async () => {
+  const source = await (await import('node:fs/promises')).readFile(
+    new URL('../src/lib/components/FormatPreview.svelte', import.meta.url), 'utf8'
+  );
+  assert.match(source, /white-space:pre-line/);
+  assert.match(source, /overflow-wrap:normal/);
+  assert.doesNotMatch(source, /overflow-wrap:anywhere/);
+});

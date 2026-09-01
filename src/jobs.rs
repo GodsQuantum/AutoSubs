@@ -12,6 +12,7 @@ use crate::subtitle::{
     group_transcription_into_lines,
     llm::correct_lines,
     normalize_subtitles,
+    segment::LayoutOptions,
     segment::transcript_timeline,
     srt::{generate_srt_content, parse_ass_to_lines, parse_srt_to_lines},
 };
@@ -151,7 +152,7 @@ async fn prepare_job(state: &AppState, id: &str, token: &CancellationToken) -> R
         job.progress = None;
         job.error = None;
     })?;
-    let _probe = probe_media(&input, token).await.context("probe video")?;
+    let probe = probe_media(&input, token).await.context("probe video")?;
     if token.is_cancelled() {
         bail!("cancelled");
     }
@@ -196,8 +197,20 @@ async fn prepare_job(state: &AppState, id: &str, token: &CancellationToken) -> R
         persist_transcript(state, id, &transcript_timeline(&transcription))?;
         let raw_path = state.config.work_dir().join(format!("{id}_words.json"));
         tokio::fs::write(&raw_path, serde_json::to_vec_pretty(&transcription)?).await?;
-        let lines =
-            group_transcription_into_lines(&transcription, preset.max_chars, preset.max_lines);
+        let output_width = preset
+            .format
+            .resolution(Some((probe.width, probe.height)))
+            .map(|(width, _)| width)
+            .unwrap_or(probe.width);
+        let lines = crate::subtitle::group_transcription_into_lines_with_layout(
+            &transcription,
+            LayoutOptions {
+                max_chars: preset.max_chars,
+                max_lines: preset.max_lines,
+                output_width,
+                font_size: preset.size,
+            },
+        );
         if settings.llm_enabled {
             update_job(state, id, |job| job.status = JobStatus::Correcting)?;
             correct_lines(lines, &settings, &state.http, token).await

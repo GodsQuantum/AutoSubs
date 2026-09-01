@@ -13,6 +13,26 @@ static ABBREVIATION_RE: OnceLock<Regex> = OnceLock::new();
 
 type LayoutMemo = HashMap<(usize, usize), Option<(f64, Vec<usize>)>>;
 
+#[derive(Debug, Clone, Copy)]
+pub struct LayoutOptions {
+    pub max_chars: u32,
+    pub max_lines: u32,
+    pub output_width: u32,
+    pub font_size: f64,
+}
+
+fn effective_max_chars(options: LayoutOptions) -> usize {
+    let metric_limit = if options.output_width > 0 && options.font_size > 0.0 {
+        // Conservative fallback for an unresolved font: average Latin glyph ≈ .46em.
+        options.output_width as f64 / (options.font_size * 0.46)
+    } else {
+        f64::INFINITY
+    };
+    (options.max_chars.max(4) as f64)
+        .min(metric_limit.floor())
+        .max(1.0) as usize
+}
+
 fn protected_token_re() -> &'static Regex {
     PROTECTED_TOKEN_RE.get_or_init(|| Regex::new(
         r"(?i)^(?:https?://\S+|www\.\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|[@#][\p{L}\p{N}_]+|\d+(?:[.,:/-]\d+)+|[\p{L}]+(?:['’][\p{L}]+)+)$"
@@ -293,6 +313,9 @@ fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Ve
             }
 
             let segment = &words[start..end];
+            if segment_text_len(segment) > max_chars && segment.len() > 1 {
+                continue;
+            }
             let mut cost = line_cost(segment, max_chars, end == words.len());
             if end < words.len() {
                 cost += boundary_penalty(&words[end - 1].word, &words[end].word);
@@ -357,14 +380,29 @@ pub fn group_transcription_into_lines(
     max_chars: u32,
     max_lines: u32,
 ) -> Vec<SubtitleLine> {
+    group_transcription_into_lines_with_layout(
+        transcription,
+        LayoutOptions {
+            max_chars,
+            max_lines,
+            output_width: 0,
+            font_size: 0.0,
+        },
+    )
+}
+
+pub fn group_transcription_into_lines_with_layout(
+    transcription: &TranscriptionResponse,
+    options: LayoutOptions,
+) -> Vec<SubtitleLine> {
     let words = raw_words(transcription);
     if words.is_empty() {
         return Vec::new();
     }
-    let max_chars = max_chars.max(4) as usize;
-    let max_lines = max_lines.clamp(1, 4) as usize;
+    let max_chars = effective_max_chars(options);
+    let max_lines = options.max_lines.clamp(1, 4) as usize;
     let target_block = max_chars * max_lines;
-    let hard_block = ((target_block as f64) * 1.35).ceil() as usize;
+    let hard_block = target_block;
 
     let mut blocks = Vec::new();
     let mut current: Vec<SubtitleWord> = Vec::new();
@@ -514,6 +552,65 @@ mod tests {
             lines.iter().all(|line| !line.text.contains("avant\nde")),
             "{:?}",
             lines
+        );
+    }
+
+    #[test]
+    fn larger_font_size_splits_events_before_visual_lines_overflow() {
+        let input = transcription(&[
+            ("abcdefgh", 0.0, 0.2),
+            ("ijklmnop", 0.2, 0.4),
+            ("qrstuvwx", 0.4, 0.6),
+            ("yzabcdef", 0.6, 0.8),
+        ]);
+        let small = group_transcription_into_lines_with_layout(
+            &input,
+            LayoutOptions {
+                max_chars: 40,
+                max_lines: 2,
+                output_width: 640,
+                font_size: 20.0,
+            },
+        );
+        let large = group_transcription_into_lines_with_layout(
+            &input,
+            LayoutOptions {
+                max_chars: 40,
+                max_lines: 2,
+                output_width: 640,
+                font_size: 80.0,
+            },
+        );
+        assert_eq!(small.len(), 1);
+        assert!(large.len() > 1);
+        assert!(large.iter().all(|line| line.text.lines().count() <= 2));
+    }
+
+    #[test]
+    fn french_sentence_prefers_natural_bottom_heavy_break() {
+        let input = transcription(&[
+            ("Je", 0.0, 0.1),
+            ("vais", 0.1, 0.2),
+            ("vraiment", 0.2, 0.3),
+            ("vous", 0.3, 0.4),
+            ("montrer", 0.4, 0.5),
+            ("comment", 0.5, 0.6),
+            ("ça", 0.6, 0.7),
+            ("fonctionne.", 0.7, 0.8),
+        ]);
+        let lines = group_transcription_into_lines_with_layout(
+            &input,
+            LayoutOptions {
+                max_chars: 40,
+                max_lines: 2,
+                output_width: 330,
+                font_size: 24.0,
+            },
+        );
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].text,
+            "Je vais vraiment vous montrer\ncomment ça fonctionne."
         );
     }
 }

@@ -153,12 +153,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     } else {
                         String::new()
                     };
+                    let mut rendered = format!("{{\\q2\\pos({x},{y})}}{float}");
                     let mut global_index = 0usize;
                     for (visual_index, visual) in visual_lines.iter().enumerate() {
-                        let curr_y = (start_y
-                            + visual_index as f64 * (preset.size + preset.line_spacing))
-                            .round() as i32;
-                        let mut rendered = format!("{{\\pos({x},{curr_y})}}{float}");
+                        if visual_index > 0 {
+                            rendered.push_str("\\N");
+                        }
                         for (word_index, token) in visual.split_whitespace().enumerate() {
                             if word_index > 0 {
                                 rendered.push(' ');
@@ -171,13 +171,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                             }
                             global_index += 1;
                         }
-                        out.push_str(&format!(
-                            "Dialogue: 0,{},{},Default,{name},0,0,0,,{}\n",
-                            format_ass_time(start),
-                            format_ass_time(end),
-                            rendered
-                        ));
                     }
+                    out.push_str(&format!(
+                        "Dialogue: 0,{},{},Default,{name},0,0,0,,{}\n",
+                        format_ass_time(start),
+                        format_ass_time(end),
+                        rendered
+                    ));
                 }
             }
             _ => {
@@ -187,28 +187,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 } else {
                     String::new()
                 };
+                let curr_y = start_y.round() as i32;
+                let (position, animation) = match preset.animation_style {
+                    AnimationStyle::Fade => (
+                        format!("{{\\q2\\pos({x},{curr_y})}}"),
+                        "{\\fad(150,150)}".to_string(),
+                    ),
+                    AnimationStyle::Bounce => (
+                        format!("{{\\q2\\pos({x},{curr_y})}}"),
+                        "{\\t(0,120,\\fscy125\\fscx105)\\t(120,240,\\fscy100\\fscx100)}"
+                            .to_string(),
+                    ),
+                    AnimationStyle::SlideUp => (
+                        String::new(),
+                        format!("{{\\q2\\move({x},{},{x},{curr_y},0,180)}}", curr_y + 25),
+                    ),
+                    _ => (format!("{{\\q2\\pos({x},{curr_y})}}"), String::new()),
+                };
+                let mut rendered = format!("{position}{float}{animation}");
                 let mut global_word = 0usize;
-                for (visual_index, visual) in visual_lines.iter().enumerate() {
-                    let curr_y = (start_y
-                        + visual_index as f64 * (preset.size + preset.line_spacing))
-                        .round() as i32;
-                    let (position, animation) = match preset.animation_style {
-                        AnimationStyle::Fade => (
-                            format!("{{\\pos({x},{curr_y})}}"),
-                            "{\\fad(150,150)}".to_string(),
-                        ),
-                        AnimationStyle::Bounce => (
-                            format!("{{\\pos({x},{curr_y})}}"),
-                            "{\\t(0,120,\\fscy125\\fscx105)\\t(120,240,\\fscy100\\fscx100)}"
-                                .to_string(),
-                        ),
-                        AnimationStyle::SlideUp => (
-                            String::new(),
-                            format!("{{\\move({x},{},{x},{curr_y},0,180)}}", curr_y + 25),
-                        ),
-                        _ => (format!("{{\\pos({x},{curr_y})}}"), String::new()),
-                    };
-                    let mut rendered = format!("{position}{float}{animation}");
+                for (line_index, visual) in visual_lines.iter().enumerate() {
+                    if line_index > 0 {
+                        rendered.push_str("\\N");
+                    }
                     if preset.animation_style == AnimationStyle::Karaoke {
                         for (idx, token) in visual.split_whitespace().enumerate() {
                             if idx > 0 {
@@ -226,15 +227,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         }
                     } else {
                         rendered.push_str(&safe_text(visual, preset.uppercase));
-                        global_word += visual.split_whitespace().count();
                     }
-                    out.push_str(&format!(
-                        "Dialogue: 0,{},{},Default,{name},0,0,0,,{}\n",
-                        format_ass_time(line.start),
-                        format_ass_time(line.end),
-                        rendered
-                    ));
                 }
+                out.push_str(&format!(
+                    "Dialogue: 0,{},{},Default,{name},0,0,0,,{}\n",
+                    format_ass_time(line.start),
+                    format_ass_time(line.end),
+                    rendered
+                ));
             }
         }
     }
@@ -307,5 +307,31 @@ mod tests {
     fn generated_dialogues_carry_stable_autosubs_name() {
         let ass = generate_ass_content(&[sample_line()], &Preset::default(), Some((1080, 1920)));
         assert!(ass.contains("Default,autosubs:0,")); // normalization reindexes line IDs
+    }
+
+    #[test]
+    fn two_line_dialogue_has_explicit_lines_and_disables_implicit_wrap() {
+        let line = SubtitleLine {
+            text: "Une ligne\nDeux lignes".into(),
+            ..sample_line()
+        };
+        let ass = generate_ass_content(
+            &[line],
+            &Preset {
+                uppercase: false,
+                ..Preset::default()
+            },
+            Some((1920, 1080)),
+        );
+        let dialogue = ass
+            .lines()
+            .find(|line| line.starts_with("Dialogue:"))
+            .unwrap();
+        assert!(dialogue.contains("\\q2"));
+        assert!(
+            dialogue.contains("\\N") && dialogue.contains("Deux lignes"),
+            "{dialogue}"
+        );
+        assert_eq!(dialogue.matches("\\N").count(), 1);
     }
 }

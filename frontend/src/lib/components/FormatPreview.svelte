@@ -141,7 +141,7 @@
   video { width:100%; height:100%; display:block; background:#000; }
   .preview-meta { position:absolute; z-index:5; top:10px; left:10px; padding:5px 8px; border:1px solid rgba(255,255,255,.13); border-radius:999px; background:rgba(3,6,7,.72); backdrop-filter:blur(8px); color:#d9e4e5; font:700 10px/1.1 Inter,ui-sans-serif,system-ui,sans-serif; letter-spacing:.025em; pointer-events:none; }
   .preview-meta span { color:#839398; font-weight:650; }
-  .preview-subtitle { position:absolute; z-index:6; transform:translate(-50%,-50%); width:max-content; max-width:92%; margin:0; padding:0; border:0; appearance:none; background:transparent; text-align:center; line-height:1.08; white-space:pre-line; overflow-wrap:anywhere; pointer-events:none; }
+  .preview-subtitle { position:absolute; z-index:6; transform:translate(-50%,-50%); width:max-content; max-width:92%; margin:0; padding:0; border:0; appearance:none; background:transparent; text-align:center; line-height:1.08; white-space:pre-line; overflow-wrap:normal; word-break:normal; pointer-events:none; }
   .preview-subtitle.editable { pointer-events:auto; cursor:grab; touch-action:none; padding:5px 7px; border-radius:6px; outline:1px dashed rgba(61,215,207,.42); }
   .preview-subtitle.editable:active { cursor:grabbing; outline-color:rgba(61,215,207,.9); }
   .safe-risk { position:absolute; z-index:3; pointer-events:none; background:rgba(255,128,125,.08); }
