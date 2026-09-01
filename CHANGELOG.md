@@ -8,7 +8,7 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ### Added
 
-- Custom fonts are discovered recursively from `AUTOSUBS_FONTS_DIR`, exposed to browser previews, and available to libass.
+- Custom fonts are discovered recursively from the fixed internal `/fonts` mount, exposed to browser previews, and available to libass.
 - Canonical word timing is durable across regrouping and visual text edits.
 - French-aware segmentation and hard `maxLines` enforcement keep rendered captions within their configured visual line limit.
 - Editor actions restore Split, Merge previous/next, and Delete subtitle block.
