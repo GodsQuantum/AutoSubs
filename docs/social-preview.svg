@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#070a0c"/><stop offset="1" stop-color="#101a20"/></linearGradient>
+    <linearGradient id="accent" x1="0" x2="1"><stop stop-color="#55e6df"/><stop offset="1" stop-color="#16b7c6"/></linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <circle cx="1030" cy="118" r="330" fill="#3dd7cf" opacity=".055"/>
+  <circle cx="1140" cy="560" r="250" fill="#3dd7cf" opacity=".035"/>
+  <g transform="translate(94 132) scale(.64)">
+    <rect width="512" height="512" rx="112" fill="#0a0f13" stroke="#24333b" stroke-width="3"/>
+    <path d="M132 116h183c45 0 81 36 81 81v90c0 15-12 27-27 27s-27-12-27-27v-90c0-15-12-27-27-27H132c-15 0-27 12-27 27v103c0 15 12 27 27 27h50c15 0 27 12 27 27s-12 27-27 27h-50c-45 0-81-36-81-81V197c0-45 36-81 81-81Z" fill="url(#accent)"/>
+    <path d="M181 192c0-13 14-21 25-14l99 61c11 7 11 23 0 30l-99 61c-11 7-25-1-25-14V192Z" fill="#63f2e9"/>
+    <rect x="224" y="343" width="194" height="54" rx="24" fill="#111b20" stroke="#3dd7cf" stroke-width="14"/>
+    <rect x="257" y="360" width="128" height="10" rx="5" fill="#63f2e9"/>
+    <rect x="272" y="403" width="112" height="28" rx="14" fill="#3dd7cf"/>
+  </g>
+  <text x="490" y="250" font-family="Inter,Arial,sans-serif" font-size="88" font-weight="800" fill="#f5f8fa">Auto<tspan fill="#3dd7cf">Subs</tspan></text>
+  <text x="494" y="320" font-family="Inter,Arial,sans-serif" font-size="28" fill="#cad5da">Self-hosted subtitle production for video.</text>
+  <text x="494" y="374" font-family="Inter,Arial,sans-serif" font-size="22" fill="#8fa1aa">Transcribe · edit · style · automate · burn</text>
+  <rect x="494" y="423" width="174" height="44" rx="22" fill="#10282b" stroke="#28565a"/>
+  <text x="581" y="452" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="18" fill="#63f2e9">Rust + SvelteKit</text>
+  <rect x="682" y="423" width="130" height="44" rx="22" fill="#151d22" stroke="#2b383f"/>
+  <text x="747" y="452" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="18" fill="#dce5e9">FFmpeg</text>
+  <rect x="826" y="423" width="116" height="44" rx="22" fill="#151d22" stroke="#2b383f"/>
+  <text x="884" y="452" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="18" fill="#dce5e9">EN / FR</text>
+</svg>
