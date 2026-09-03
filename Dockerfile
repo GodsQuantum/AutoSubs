@@ -8,7 +8,7 @@ COPY frontend/ ./
 COPY Cargo.toml CHANGELOG.md README.md /src/
 RUN npm run check && npm test && npm run build
 
-FROM rust:1.98.0-trixie@sha256:7f7a53a25a0319dd8284e279d529d45759cb384d59b14cc6806132910f45522e AS builder
+FROM rust:1.98.0-trixie@sha256:620dbcd124499c59e2406d3741574b5c5838cf9eb9656f0c3a03948f79b02959 AS builder
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY rust-toolchain.toml ./
