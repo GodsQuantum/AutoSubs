@@ -157,6 +157,8 @@ global/default preset resolution
 
 Applying a preset to a Job adopts the preset format, fit mode and segmentation limits by default. Explicit edits made after applying it remain possible.
 
+Each Job inherits its outro from the selected Preset (then its Brand). The Editor can override that choice for one Job with another video asset or no outro.
+
 ## 🔄 Watch folders
 
 Workflows combine low-latency filesystem events with periodic reconciliation. This matters on NFS: a remote write does not necessarily produce the local inotify event you expected.
@@ -221,35 +223,37 @@ GET          /api/v1/health
 GET          /api/v1/capabilities
 GET          /api/v1/events                         SSE
 
-GET/POST     /api/v1/jobs
-GET/PUT/DELETE /api/v1/jobs/{id}                      Delete keeps source/final media
-GET          /api/v1/jobs/{id}/media                Range-aware video stream
+GET          /api/v1/jobs
+POST         /api/v1/jobs/from-path
+GET/PUT/DELETE /api/v1/jobs/{id}                    Delete keeps source/final media
+GET/HEAD     /api/v1/jobs/{id}/video                 Compatibility: output, then source
+GET/HEAD     /api/v1/jobs/{id}/video/source          Original source only
+GET/HEAD     /api/v1/jobs/{id}/video/output          Rendered output only
 POST         /api/v1/jobs/{id}/cancel
+POST         /api/v1/jobs/{id}/prepare
 POST         /api/v1/jobs/{id}/render
 POST         /api/v1/jobs/{id}/retranscribe
 PUT/DELETE   /api/v1/jobs/{id}/sidecar
+POST         /api/v1/jobs/{id}/sidecar/upload
 GET/PUT      /api/v1/jobs/{id}/subtitles
-POST         /api/v1/jobs/{id}/subtitles/regroup
-POST         /api/v1/jobs/{id}/subtitles/shift
-GET          /api/v1/jobs/{id}/subtitles/export
+POST         /api/v1/jobs/{id}/regroup
+GET          /api/v1/jobs/{id}/subtitles/{srt|ass|json}
 
-GET          /api/v1/fonts                             Detected custom font catalog
-GET          /api/v1/fonts/css                         Browser @font-face stylesheet
-GET          /api/v1/fonts/{id}/content                Safe font content endpoint
+GET          /api/v1/fonts                          Detected custom font catalog
+GET          /api/v1/fonts/css                      Browser @font-face stylesheet
+GET          /api/v1/fonts/{id}/content             Safe font content endpoint
 
 POST         /api/v1/uploads                        tus create
 HEAD/PATCH   /api/v1/uploads/{id}                   tus resume/upload
-DELETE       /api/v1/uploads/{id}
 
 GET/POST     /api/v1/presets
-GET/PUT/DEL  /api/v1/presets/{id}
+DELETE       /api/v1/presets/{id}
 GET/POST     /api/v1/brands
-GET/PUT/DEL  /api/v1/brands/{id}
+DELETE       /api/v1/brands/{id}
 GET/POST     /api/v1/workflows
-GET/PUT/DEL  /api/v1/workflows/{id}
+DELETE       /api/v1/workflows/{id}
 GET/PUT      /api/v1/settings
-GET          /api/v1/files/roots
-GET          /api/v1/files/browse
+GET          /api/v1/browse
 GET/POST     /api/v1/assets
 DELETE       /api/v1/assets/{id}
 ```

@@ -83,6 +83,14 @@ pub fn router() -> Router<AppState> {
             get(media::stream_job_video).head(media::head_job_video),
         )
         .route(
+            "/api/v1/jobs/{id}/video/source",
+            get(media::stream_job_source_video).head(media::head_job_source_video),
+        )
+        .route(
+            "/api/v1/jobs/{id}/video/output",
+            get(media::stream_job_output_video).head(media::head_job_output_video),
+        )
+        .route(
             "/api/v1/presets",
             get(resources::list_presets).post(resources::upsert_preset),
         )

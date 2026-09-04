@@ -565,6 +565,15 @@ impl JobStatus {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "mode", content = "assetId", rename_all = "snake_case")]
+pub enum JobOutro {
+    #[default]
+    Inherit,
+    None,
+    Asset(String),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
@@ -585,6 +594,8 @@ pub struct Job {
     pub preset_id: Option<String>,
     #[serde(default)]
     pub format: FormatProfile,
+    #[serde(default)]
+    pub outro: JobOutro,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_id: Option<String>,
     #[serde(default)]

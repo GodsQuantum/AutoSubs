@@ -128,6 +128,11 @@ test('demo preview time loops without losing pause continuity', () => {
 });
 
 test('preview metrics scale exactly from rendered canvas height', async () => { const { scalePreviewMetric } = await import('../src/lib/preview.js'); assert.equal(scalePreviewMetric(28, 280, 1920), 28 * 280 / 1920); assert.equal(scalePreviewMetric(60, 225, 1080), 12.5); });test('font matching distinguishes every file by its full face name', () => { const fonts = [{ family:'League Spartan', fullName:'League Spartan Light', fileName:'LeagueSpartan-Light.ttf', weight:300, italic:false }, { family:'League Spartan', fullName:'League Spartan Bold', fileName:'LeagueSpartan-Bold.ttf', weight:700, italic:false }]; assert.deepEqual(customFontMatch(fonts, 'League Spartan Light'), fonts[0]); assert.deepEqual(customFontMatch(fonts, 'League Spartan Bold'), fonts[1]); });test('successful empty API responses do not require JSON', async () => { const module = await import('../src/lib/api-response.js').catch(() => ({})); assert.equal(typeof module.parseApiResponse, 'function'); assert.equal(await module.parseApiResponse(new Response(null, { status:200 })), undefined); });
+test('preview metrics keep a constant visual ratio from the 1080p preset baseline', async () => {
+  const { scalePreviewMetric } = await import('../src/lib/preview.js');
+  assert.equal(scalePreviewMetric(28, 280), 28 * 280 / 1080);
+  assert.equal(scalePreviewMetric(60, 225), 12.5);
+});
 test('custom font verification distinguishes catalog fonts from system fonts', async () => {
   const fonts = [{ family: 'Studio Sans', fileName: 'studio-sans.woff2', weight: 700, italic: true }];
   assert.deepEqual(customFontMatch(fonts, 'Studio Sans'), fonts[0]);
@@ -142,4 +147,22 @@ test('custom font verification distinguishes catalog fonts from system fonts', a
   assert.deepEqual(await verifyCustomFont(fontSet, fonts[0]), { status: 'loaded', fileName: 'studio-sans.woff2' });
   assert.deepEqual(calls, [['load', 'italic 700 16px "Studio Sans"'], ['check', 'italic 700 16px "Studio Sans"']]);
   assert.deepEqual(await verifyCustomFont(undefined, fonts[0]), { status: 'unavailable', fileName: 'studio-sans.woff2' });
+});
+test('subtitle download keeps the server filename and surfaces API errors', async () => {
+  const { fetchDownload, filenameFromDisposition } = await import('../src/lib/download.js');
+  assert.equal(filenameFromDisposition('attachment; filename="clip.srt"', 'fallback.srt'), 'clip.srt');
+  assert.equal(filenameFromDisposition("attachment; filename*=UTF-8''sous-titres%20final.srt", 'fallback.srt'), 'sous-titres final.srt');
+  const payload = await fetchDownload('/subtitles', 'fallback.srt', async () =>
+    new Response('1\n00:00:00,000 --> 00:00:01,000\nBonjour', {
+      headers: { 'content-disposition': 'attachment; filename="bonjour.srt"' }
+    })
+  );
+  assert.equal(payload.filename, 'bonjour.srt');
+  assert.equal(await payload.blob.text(), '1\n00:00:00,000 --> 00:00:01,000\nBonjour');
+  await assert.rejects(
+    fetchDownload('/subtitles', 'fallback.srt', async () =>
+      new Response(JSON.stringify({ error: { message: 'export unavailable' } }), { status: 409 })
+    ),
+    /export unavailable/
+  );
 });

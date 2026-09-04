@@ -1,5 +1,5 @@
 import { parseApiResponse } from './api-response.js';
-import type { Asset, Brand, BrowseResponse, Capabilities, FontFace, Job, Preset, SettingsView, SubtitleLine, Workflow, FormatProfile } from './types';
+import type { Asset, Brand, BrowseResponse, Capabilities, FontFace, Job, JobOutro, Preset, SettingsView, SubtitleLine, Workflow, FormatProfile } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -28,7 +28,7 @@ export const api = {
   cancel: (id: string) => request<Job>(`/api/v1/jobs/${id}/cancel`, { method: 'POST' }),
   retranscribe: (id: string) => request<{accepted:boolean}>(`/api/v1/jobs/${id}/retranscribe`, { method: 'POST' }),
   deleteJob: (id: string) => request<void>(`/api/v1/jobs/${id}`, { method: 'DELETE' }),
-  updateJob: (id: string, body: { presetId?: string | null; format?: FormatProfile }) => request<Job>(`/api/v1/jobs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  updateJob: (id: string, body: { presetId?: string | null; format?: FormatProfile; outro?: JobOutro }) => request<Job>(`/api/v1/jobs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   subtitles: (id: string) => request<SubtitleLine[]>(`/api/v1/jobs/${id}/subtitles`),
   saveSubtitles: (id: string, lines: SubtitleLine[]) => request<{lines:SubtitleLine[]; repairedLineOverlaps:number; retimedWordLines:number; droppedEmptyLines:number}>(`/api/v1/jobs/${id}/subtitles`, { method: 'PUT', body: JSON.stringify(lines) }),
   regroup: (id: string, maxChars: number, maxLines: number) => request<SubtitleLine[]>(`/api/v1/jobs/${id}/regroup`, { method: 'POST', body: JSON.stringify({ maxChars, maxLines }) }),
@@ -58,6 +58,8 @@ export const api = {
 
 export const subtitleExportUrl = (id:string, format:'srt'|'ass'|'json') => `/api/v1/jobs/${id}/subtitles/${format}`;
 export const videoUrl = (id:string) => `/api/v1/jobs/${id}/video`;
+export const sourceVideoUrl = (id:string) => `/api/v1/jobs/${id}/video/source`;
+export const renderedVideoUrl = (id:string) => `/api/v1/jobs/${id}/video/output`;
 export const assetUrl = (id:string) => `/api/v1/assets/${id}/content`;
 
 const TUS = '1.0.0';

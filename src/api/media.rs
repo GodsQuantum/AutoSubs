@@ -12,11 +12,18 @@ use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
+#[derive(Clone, Copy)]
+enum VideoKind {
+    Preferred,
+    Source,
+    Output,
+}
+
 pub async fn head_job_video(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Response<Body>> {
-    let path = job_video(&state, &id)?;
+    let path = job_video(&state, &id, VideoKind::Preferred)?;
     response_for(path, HeaderMap::new(), true).await
 }
 pub async fn stream_job_video(
@@ -24,19 +31,64 @@ pub async fn stream_job_video(
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> AppResult<Response<Body>> {
-    let path = job_video(&state, &id)?;
+    let path = job_video(&state, &id, VideoKind::Preferred)?;
     response_for(path, headers, false).await
 }
-fn job_video(state: &AppState, id: &str) -> AppResult<PathBuf> {
+
+pub async fn head_job_source_video(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<Response<Body>> {
+    let path = job_video(&state, &id, VideoKind::Source)?;
+    response_for(path, HeaderMap::new(), true).await
+}
+
+pub async fn stream_job_source_video(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Response<Body>> {
+    let path = job_video(&state, &id, VideoKind::Source)?;
+    response_for(path, headers, false).await
+}
+
+pub async fn head_job_output_video(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<Response<Body>> {
+    let path = job_video(&state, &id, VideoKind::Output)?;
+    response_for(path, HeaderMap::new(), true).await
+}
+
+pub async fn stream_job_output_video(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Response<Body>> {
+    let path = job_video(&state, &id, VideoKind::Output)?;
+    response_for(path, headers, false).await
+}
+
+fn job_video(state: &AppState, id: &str, kind: VideoKind) -> AppResult<PathBuf> {
     let job = jobs::get_job(state, id).map_err(|_| AppError::NotFound("job not found".into()))?;
-    let path = job
-        .output_path
-        .or(job.input_path)
+    let path = select_video_path(job.input_path, job.output_path, kind)
         .ok_or_else(|| AppError::NotFound("job has no video".into()))?;
     if !path.is_file() {
         return Err(AppError::NotFound("video file no longer exists".into()));
     }
     Ok(path)
+}
+
+fn select_video_path(
+    input: Option<PathBuf>,
+    output: Option<PathBuf>,
+    kind: VideoKind,
+) -> Option<PathBuf> {
+    match kind {
+        VideoKind::Preferred => output.or(input),
+        VideoKind::Source => input,
+        VideoKind::Output => output,
+    }
 }
 
 async fn response_for(
@@ -118,5 +170,23 @@ mod tests {
         assert_eq!(parse_range("bytes=-100", 1000), Some((900, 999)));
         assert_eq!(parse_range("bytes=500-", 1000), Some((500, 999)));
         assert_eq!(parse_range("bytes=0-99", 1000), Some((0, 99)));
+    }
+
+    #[test]
+    fn source_and_output_are_selected_explicitly() {
+        let input = Some(PathBuf::from("source.mp4"));
+        let output = Some(PathBuf::from("rendered.mp4"));
+        assert_eq!(
+            select_video_path(input.clone(), output.clone(), VideoKind::Source),
+            input
+        );
+        assert_eq!(
+            select_video_path(None, output.clone(), VideoKind::Source),
+            None
+        );
+        assert_eq!(
+            select_video_path(input, output.clone(), VideoKind::Output),
+            output
+        );
     }
 }

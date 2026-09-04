@@ -45,8 +45,8 @@
 <AppShell {active} onnav={nav}>
   {#if initialError}<div class="page"><div class="card"><div class="card-body" style="color:var(--danger)"><strong>{$dictionary.connectionLost}</strong><div class="small" style="margin-top:6px">{initialError}</div><button class="btn" style="margin-top:12px" on:click={loadAll}>{$dictionary.retry}</button></div></div></div>{/if}
   {#if active==='queue'}<QueueView {jobs} {presets} refresh={refreshJobs} {openEditor} {notify}/>
-  {:else if active==='editor'}<EditorView job={selectedJob} {presets} {fonts} refresh={refreshJobs} {notify}/>
-  {:else if active==='presets'}<PresetsView {presets} {brands} {fonts} refresh={loadAll} {notify}/>
+  {:else if active==='editor'}<EditorView job={selectedJob} {presets} {brands} {assets} {fonts} refresh={refreshJobs} {notify}/>
+  {:else if active==='presets'}<PresetsView {presets} {brands} {assets} {fonts} refresh={loadAll} {notify}/>
   {:else if active==='brands'}<BrandsView {brands} {presets} {assets} refresh={loadAll} {notify}/>
   {:else if active==='workflows'}<WorkflowsView {workflows} {brands} {presets} refresh={loadAll} {notify}/>
   {:else}<SettingsViewComponent {settings} {capabilities} refresh={loadAll} {notify}/>{/if}

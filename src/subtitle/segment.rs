@@ -52,20 +52,45 @@ fn cleaned_word(word: &str) -> String {
         .trim_matches(|c: char| {
             matches!(
                 c,
-                ',' | ';' | ':' | '!' | '?' | '.' | '…' | '(' | ')' | '[' | ']' | '"' | '«' | '»'
+                ',' | ';'
+                    | ':'
+                    | '!'
+                    | '?'
+                    | '.'
+                    | '…'
+                    | '('
+                    | ')'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '"'
+                    | '«'
+                    | '»'
+                    | '“'
+                    | '”'
+                    | '‘'
+                    | '’'
             )
         })
         .to_lowercase()
 }
 
 fn pair_is_bound(left: &str, right: &str) -> bool {
+    let left_trimmed = left.trim_end();
+    let right_trimmed = right.trim_start();
+    if right_trimmed.starts_with([',', '.', ';', ':', '!', '?', '…', ')', ']', '}', '»', '”'])
+        || left_trimmed.ends_with(['(', '[', '{', '«', '“'])
+    {
+        return true;
+    }
     let l = cleaned_word(left);
     let r = cleaned_word(right);
     if l.is_empty() || r.is_empty() {
         return false;
     }
 
-    if left.trim_end().ends_with(['\'', '’']) || right.trim_start().starts_with(['\'', '’']) {
+    if left_trimmed.ends_with(['\'', '’']) || right_trimmed.starts_with(['\'', '’']) {
         return true;
     }
     if protected_token_re().is_match(left.trim()) || protected_token_re().is_match(right.trim()) {
@@ -126,11 +151,11 @@ fn boundary_penalty(left: &str, right: &str) -> f64 {
     }
     if right
         .trim_start()
-        .starts_with([',', '.', ';', ':', '!', '?', '…', ')', ']', '»'])
+        .starts_with([',', '.', ';', ':', '!', '?', '…', ')', ']', '}', '»', '”'])
     {
         return 10_000.0;
     }
-    if left.trim_end().ends_with(['(', '[', '«']) {
+    if left.trim_end().ends_with(['(', '[', '{', '«', '“']) {
         return 10_000.0;
     }
     if abbreviation_re().is_match(left.trim()) {
@@ -145,9 +170,58 @@ fn boundary_penalty(left: &str, right: &str) -> f64 {
     0.0
 }
 
+fn ends_sentence(word: &str) -> bool {
+    word.trim_end()
+        .trim_end_matches(['\"', '”', '’', '»', ')', ']', '}'])
+        .ends_with(['.', '!', '?', '…'])
+}
+
 fn fix_tokenization(words: Vec<SubtitleWord>) -> Vec<SubtitleWord> {
     let mut fixed: Vec<SubtitleWord> = Vec::with_capacity(words.len());
-    for word in words {
+    let mut pending_prefix: Option<SubtitleWord> = None;
+    let mut double_quote_open = false;
+
+    for mut word in words {
+        let token = word.word.trim().to_owned();
+        let token = token.as_str();
+        let symmetric_quote = token == "\"";
+        let opening = matches!(token, "(" | "[" | "{" | "«" | "“" | "‘")
+            || (symmetric_quote && !double_quote_open);
+        let closing =
+            matches!(token, ")" | "]" | "}" | "”") || (symmetric_quote && double_quote_open);
+        if symmetric_quote {
+            double_quote_open = !double_quote_open;
+        }
+        if opening {
+            pending_prefix = Some(match pending_prefix.take() {
+                Some(mut prefix) => {
+                    prefix.word.push_str(token);
+                    prefix.end = word.end;
+                    prefix
+                }
+                None => word,
+            });
+            continue;
+        }
+        if let Some(prefix) = pending_prefix.take() {
+            let spacing = if prefix.word.trim_end().ends_with('«') {
+                "\u{202f}"
+            } else {
+                ""
+            };
+            word.word = format!("{}{spacing}{}", prefix.word.trim(), word.word.trim());
+            word.start = prefix.start;
+        }
+        if (closing || matches!(token, "," | "." | "…" | ")" | "]" | "}" | "»"))
+            && let Some(last) = fixed.last_mut()
+        {
+            if token == "»" {
+                last.word.push('\u{202f}');
+            }
+            last.word.push_str(token);
+            last.end = word.end;
+            continue;
+        }
         if let Some(last) = fixed.last_mut() {
             let left = last.word.trim_end();
             let right = word.word.trim_start();
@@ -158,6 +232,9 @@ fn fix_tokenization(words: Vec<SubtitleWord>) -> Vec<SubtitleWord> {
             }
         }
         fixed.push(word);
+    }
+    if let Some(prefix) = pending_prefix {
+        fixed.push(prefix);
     }
     fixed
 }
@@ -271,7 +348,10 @@ fn segment_text_len(words: &[SubtitleWord]) -> usize {
 }
 
 fn needs_space(left: &str, right: &str) -> bool {
-    !left.trim_end().ends_with(['\'', '’']) && !right.trim_start().starts_with(['\'', '’'])
+    !left.trim_end().ends_with(['\'', '’', '(', '[', '{', '“'])
+        && !right
+            .trim_start()
+            .starts_with(['\'', '’', ',', '.', '…', ')', ']', '}', '»', '”'])
 }
 
 fn display_words(words: &[SubtitleWord]) -> String {
@@ -360,9 +440,7 @@ fn event_boundary_strength(words: &[SubtitleWord], index: usize) -> i32 {
     let left = &words[index - 1];
     let right = &words[index];
     let gap = (right.start - left.end).max(0.0);
-    if left.word.trim_end().ends_with(['.', '!', '?', '…'])
-        && !abbreviation_re().is_match(left.word.trim())
-    {
+    if ends_sentence(&left.word) && !abbreviation_re().is_match(left.word.trim()) {
         500
     } else if gap >= 0.35 {
         400
@@ -449,8 +527,8 @@ pub fn group_transcription_into_lines_with_layout(
     for word in words {
         if let Some(previous) = current.last() {
             let gap = (word.start - previous.end).max(0.0);
-            let sentence_end = previous.word.trim_end().ends_with(['.', '!', '?', '…'])
-                && !abbreviation_re().is_match(previous.word.trim());
+            let sentence_end =
+                ends_sentence(&previous.word) && !abbreviation_re().is_match(previous.word.trim());
             if !pair_is_bound(&previous.word, &word.word)
                 && (sentence_end
                     || gap >= 0.35
@@ -597,6 +675,62 @@ mod tests {
         assert_eq!(emitted[1].word, "arrive");
     }
 
+    #[test]
+    fn standalone_closing_punctuation_stays_with_the_previous_word() {
+        let input = transcription(&[
+            ("Bonjour", 0.0, 0.3),
+            (".", 0.3, 0.35),
+            ("Nouvelle", 0.35, 0.7),
+            ("phrase", 0.7, 0.9),
+            ("!", 0.9, 1.0),
+        ]);
+        let lines = group_transcription_into_lines(&input, 42, 2);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines[0].text, "Bonjour.");
+        assert_eq!(lines[1].text, "Nouvelle phrase !");
+        assert!(
+            lines
+                .iter()
+                .all(|line| !line.text.starts_with(['.', ',', ')', ']', '»']))
+        );
+    }
+
+    #[test]
+    fn standalone_quotes_never_form_orphan_boundaries() {
+        let input = transcription(&[
+            ("Il", 0.0, 0.1),
+            ("dit", 0.1, 0.2),
+            (":", 0.2, 0.25),
+            ("\"", 0.25, 0.3),
+            ("Bonjour", 0.3, 0.6),
+            (".", 0.6, 0.65),
+            ("\"", 0.65, 0.7),
+        ]);
+        let lines = group_transcription_into_lines(&input, 12, 2);
+        assert!(
+            lines
+                .iter()
+                .flat_map(|line| line.words.as_deref().unwrap_or_default())
+                .all(|word| word.word != "\""),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().all(|line| !line.text.ends_with(": \"")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().all(|line| !line.text.starts_with(".\"")),
+            "{lines:?}"
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| line.text.replace('\n', " "))
+                .collect::<Vec<_>>()
+                .join(" "),
+            "Il dit : \"Bonjour.\""
+        );
+    }
     #[test]
     fn balanced_layout_avoids_breaking_avant_de() {
         let input = transcription(&[

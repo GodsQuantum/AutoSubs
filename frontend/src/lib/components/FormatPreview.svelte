@@ -58,7 +58,6 @@
   $: previewWidth = previewWidthForRatio(ratio);
   $: objectFit = videoObjectFit(format);
   $: guide = safeZoneGuide(safeZone);
-  $: outputHeight = format.key === 'portrait916' ? 1920 : format.key === 'landscape169' ? 1080 : format.key === 'square11' ? 1080 : format.key === 'portrait45' ? 1350 : format.key === 'custom' && format.height ? Number(format.height) : naturalHeight || 1080;
   $: displayWidth = measuredWidth || previewWidth;
   $: displayHeight = measuredHeight || previewWidth / ratio;
   $: p = preset;
@@ -75,15 +74,15 @@
   $: eventTime = Math.max(0, previewTime - (previewWords[0]?.start ?? 0));
   $: wobbleDuration = 1 / Math.max(0.05, Number(p?.wobbleSpeed) || 1);
   $: motionStyle = `--preview-time:${previewTime};--event-time:${eventTime};--wobble-duration:${wobbleDuration}s;`;
-  $: fontSize = p ? scalePreviewMetric(p.size,displayHeight,outputHeight) : 18;
+  $: fontSize = p ? scalePreviewMetric(p.size,displayHeight) : 18;
   $: lineHeight = 1.08;
   $: visualLines = Math.max(1, text.split('\n').filter(line=>line.trim()).length);
   $: longestLine = Math.max(1, ...text.split('\n').map(line=>Array.from(line).length));
   $: estimatedBlockWidth = Math.min(displayWidth * .9, longestLine * fontSize * .56);
-  $: estimatedBlockHeight = visualLines * fontSize + Math.max(0,visualLines-1) * scalePreviewMetric(p?.lineSpacing ?? 0,displayHeight,outputHeight);
+  $: estimatedBlockHeight = visualLines * fontSize + Math.max(0,visualLines-1) * scalePreviewMetric(p?.lineSpacing ?? 0,displayHeight);
   $: positionBounds = subtitlePositionBounds(displayWidth, displayHeight, estimatedBlockWidth, estimatedBlockHeight);
-  $: outlineSize = p ? scalePreviewMetric(p.outlineThickness,displayHeight,outputHeight) : 0;
-  $: shadowSize = p ? scalePreviewMetric(p.shadowThickness ?? 1,displayHeight,outputHeight) : 0;
+  $: outlineSize = p ? scalePreviewMetric(p.outlineThickness,displayHeight) : 0;
+  $: shadowSize = p ? scalePreviewMetric(p.shadowThickness ?? 1,displayHeight) : 0;
   $: safePosition = clampPreviewPosition(p?.positionX ?? 50, p?.positionY ?? 68, positionBounds);
   $: subtitleStyle = p
     ? `top:${safePosition.y}%;left:${safePosition.x}%;font-size:${fontSize}px;line-height:${lineHeight};color:${p.baseColor};font-family:"${renderedFamily.replaceAll('"','\\"')}";font-weight:${renderedWeight};font-style:${renderedItalic?'italic':'normal'};font-synthesis:none;text-transform:${p.uppercase?'uppercase':'none'};-webkit-text-stroke:${outlineSize}px ${p.outlineColor};text-shadow:0 ${shadowSize}px ${shadowSize*2}px ${p.shadowColor??'#000000'};`

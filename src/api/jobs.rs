@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    domain::{FormatProfile, Job, SubtitleLine},
+    domain::{FormatProfile, Job, JobOutro, SubtitleLine},
     error::{AppError, AppResult},
     format::normalize_format_profile,
     jobs,
@@ -43,6 +43,8 @@ pub struct JobOptions {
     preset_id: Option<String>,
     #[serde(default)]
     format: Option<FormatProfile>,
+    #[serde(default)]
+    outro: Option<JobOutro>,
 }
 pub async fn update_job_options(
     State(state): State<AppState>,
@@ -61,8 +63,19 @@ pub async fn update_job_options(
     {
         return Err(AppError::BadRequest("unknown presetId".into()));
     }
+    if let Some(JobOutro::Asset(asset_id)) = body.outro.as_ref() {
+        let asset = state
+            .db
+            .get::<crate::domain::Asset>("asset", asset_id)
+            .map_err(AppError::Internal)?
+            .ok_or_else(|| AppError::BadRequest("unknown outro asset".into()))?;
+        if !asset.mime.starts_with("video/") {
+            return Err(AppError::BadRequest("outro asset must be a video".into()));
+        }
+    }
     let preset_id = body.preset_id;
     let mut format = body.format;
+    let outro = body.outro;
     if let Some(profile) = format.as_mut() {
         normalize_format_profile(profile).map_err(AppError::BadRequest)?;
     }
@@ -70,6 +83,9 @@ pub async fn update_job_options(
         job.preset_id = preset_id;
         if let Some(format) = format {
             job.format = format;
+        }
+        if let Some(outro) = outro {
+            job.outro = outro;
         }
     })
     .map(Json)
@@ -340,13 +356,7 @@ pub async fn export_subtitles(
     );
     headers.insert(
         axum::http::header::CONTENT_DISPOSITION,
-        format!(
-            "attachment; filename=\"{}.{}\"",
-            safe_stem(&job.original_name),
-            format
-        )
-        .parse()
-        .map_err(|_| AppError::BadRequest("invalid filename".into()))?,
+        attachment_header(&job.original_name, &format)?,
     );
     Ok((headers, Bytes::from(data)))
 }
@@ -374,4 +384,59 @@ fn safe_stem(name: &str) -> String {
         .chars()
         .filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | ' '))
         .collect()
+}
+
+fn attachment_header(name: &str, format: &str) -> AppResult<axum::http::HeaderValue> {
+    let stem = safe_stem(name);
+    let stem = if stem.trim().is_empty() {
+        "subtitles".to_owned()
+    } else {
+        stem
+    };
+    let fallback: String = stem
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | ' ') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let utf8_name = encode_header_parameter(&format!("{stem}.{format}"));
+    format!("attachment; filename=\"{fallback}.{format}\"; filename*=UTF-8''{utf8_name}")
+        .parse()
+        .map_err(|_| AppError::BadRequest("invalid filename".into()))
+}
+
+fn encode_header_parameter(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'!' | b'#' | b'$' | b'&' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
+            )
+        {
+            encoded.push(byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push(HEX[(byte >> 4) as usize] as char);
+            encoded.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+    }
+    encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_filename_header_supports_unicode() {
+        let header = attachment_header("Épisode été.mp4", "srt").unwrap();
+        let value = header.to_str().unwrap();
+        assert!(value.contains("filename*=UTF-8''%C3%89pisode%20%C3%A9t%C3%A9.srt"));
+    }
 }
