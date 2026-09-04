@@ -16,7 +16,8 @@ export interface Preset {
 export interface BrandAssets { defaultOutro?:string; logo?:string }
 export interface Brand { id:string; name:string; description:string; assets:BrandAssets; presetIds:string[]; defaultPresetByFormat:Partial<Record<FormatKey,string>> }
 export interface Workflow { id:string; name:string; watchDir:string; outputDir:string; archiveDir:string; brandId?:string; format:FormatProfile; presetId?:string; enabled:boolean }
-export interface Job { id:string; originalName:string; status:JobStatus; progress?:number; lines?:SubtitleLine[]; error?:string; inputPath?:string; outputPath?:string; presetId?:string; format:FormatProfile; workflowId?:string; archiveAfterSuccess:boolean; attachedSidecar?:string; createdAtMs:number; updatedAtMs:number }
+export type JobOutro = {mode:'inherit'} | {mode:'none'} | {mode:'asset';assetId:string};
+export interface Job { id:string; originalName:string; status:JobStatus; progress?:number; lines?:SubtitleLine[]; error?:string; inputPath?:string; outputPath?:string; presetId?:string; format:FormatProfile; outro:JobOutro; workflowId?:string; archiveAfterSuccess:boolean; attachedSidecar?:string; createdAtMs:number; updatedAtMs:number }
 export interface Encoder { kind:'auto'|'libx264'|'libx265'|'nvenc_h264'|'nvenc_hevc'|'qsv_h264'|'vaapi_h264'|'amf_h264'; quality:number; preset:string }
 export interface SettingsView {
   transcriptionUrl:string; transcriptionModel:string; transcriptionApiKeySet:boolean; language:string;
