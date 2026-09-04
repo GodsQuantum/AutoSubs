@@ -1,6 +1,6 @@
 use crate::domain::{
-    Asset, Brand, EncoderKind, Job, JobStatus, Preset, RawWord, SubtitleLine, TimingQuality,
-    TranscriptTimeline, TranscriptionResponse, Workflow,
+    Asset, Brand, EncoderKind, Job, JobOutro, JobStatus, Preset, RawWord, SubtitleLine,
+    TimingQuality, TranscriptTimeline, TranscriptionResponse, Workflow,
 };
 use crate::media::process::ProcessError;
 use crate::media::transcribe::{TranscriptionError, extract_audio, transcribe_audio};
@@ -8,7 +8,7 @@ use crate::media::{build_render_plan, probe_media, render_video};
 use crate::state::AppState;
 use crate::subtitle::{
     NormalizeOptions,
-    ass::generate_ass_content,
+    ass::{generate_ass_content, scale_ass_metric},
     group_transcription_into_lines,
     llm::correct_lines,
     normalize_subtitles,
@@ -55,6 +55,7 @@ pub fn create_job(
         input_path: Some(input_path),
         output_path: None,
         preset_id,
+        outro: crate::domain::JobOutro::Inherit,
         format: workflow.map(|w| w.format.clone()).unwrap_or_default(),
         workflow_id: workflow.map(|w| w.id.clone()),
         archive_after_success: workflow.is_some(),
@@ -258,18 +259,17 @@ async fn prepare_job(
         persist_transcript(state, id, &transcript_timeline(&transcription))?;
         let raw_path = state.config.work_dir().join(format!("{id}_words.json"));
         tokio::fs::write(&raw_path, serde_json::to_vec_pretty(&transcription)?).await?;
-        let output_width = preset
+        let (output_width, output_height) = preset
             .format
             .resolution(Some((probe.width, probe.height)))
-            .map(|(width, _)| width)
-            .unwrap_or(probe.width);
+            .unwrap_or((probe.width, probe.height));
         let lines = crate::subtitle::group_transcription_into_lines_with_layout(
             &transcription,
             LayoutOptions {
                 max_chars: preset.max_chars,
                 max_lines: preset.max_lines,
                 output_width,
-                font_size: preset.size,
+                font_size: scale_ass_metric(preset.size, output_height),
             },
         );
         if settings.llm_enabled {
@@ -384,7 +384,7 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
     cleanup.track(work_ass.clone());
     let ass = generate_ass_content(&lines, &preset, Some((source.width, source.height)));
     tokio::fs::write(&work_ass, ass.as_bytes()).await?;
-    let outro = resolve_outro(state, &preset).await;
+    let outro = resolve_outro(state, &preset, &job.outro).await;
     let outro_probe = if let Some(path) = &outro {
         Some(probe_media(path, token).await.context("probe outro")?)
     } else {
@@ -547,6 +547,19 @@ pub fn save_subtitles(
     }
     let report = normalize_subtitles(&lines, NormalizeOptions::default());
     let saved = report.lines.clone();
+    let timing_quality = state
+        .db
+        .get::<TranscriptTimeline>("job_transcript", id)?
+        .map(|timeline| timeline.timing_quality)
+        .unwrap_or(TimingQuality::Inferred);
+    let timeline = TranscriptTimeline {
+        words: saved
+            .iter()
+            .flat_map(|line| line.words.clone().unwrap_or_default())
+            .collect(),
+        timing_quality,
+    };
+    persist_transcript(state, id, &timeline)?;
     update_job(state, id, move |job| {
         job.lines = Some(saved);
         job.status = JobStatus::Ready;
@@ -778,16 +791,20 @@ pub async fn resolve_preset(
         .unwrap_or_default()
 }
 
-async fn resolve_outro(state: &AppState, preset: &Preset) -> Option<PathBuf> {
+async fn resolve_outro(state: &AppState, preset: &Preset, selection: &JobOutro) -> Option<PathBuf> {
     let brands = state.brands.read().await;
     let brand: Option<&Brand> = preset
         .brand_id
         .as_deref()
         .and_then(|id| brands.iter().find(|b| b.id == id));
-    let value = preset
-        .outro_video
-        .clone()
-        .or_else(|| brand.and_then(|b| b.assets.default_outro.clone()))?;
+    let value = match selection {
+        JobOutro::None => return None,
+        JobOutro::Asset(asset_id) => asset_id.clone(),
+        JobOutro::Inherit => preset
+            .outro_video
+            .clone()
+            .or_else(|| brand.and_then(|b| b.assets.default_outro.clone()))?,
+    };
     let direct = PathBuf::from(&value);
     if direct.is_absolute()
         && let Ok(path) = state.config.resolve_allowed_file(&direct)
@@ -1025,7 +1042,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn regroup_prefers_canonical_timeline_after_visual_edit() {
+    async fn saved_corrections_become_the_canonical_regroup_timeline() {
         let (_root, state) = test_state().await;
         let job = create_job(
             &state,
@@ -1056,7 +1073,6 @@ mod tests {
                 end: 2.0,
             },
         ]);
-        update_job(&state, &job.id, |job| job.lines = Some(vec![edited])).unwrap();
         persist_transcript(
             &state,
             &job.id,
@@ -1070,9 +1086,13 @@ mod tests {
             },
         )
         .unwrap();
+        save_subtitles(&state, &job.id, vec![edited]).unwrap();
         let regrouped = regroup_subtitles(&state, &job.id, 25, 2).unwrap();
-        assert_eq!(regrouped[0].text, "canonical");
-        assert_eq!((regrouped[0].start, regrouped[0].end), (4.0, 5.0));
+        assert_eq!(regrouped[0].text, "edited layout");
+        assert_eq!((regrouped[0].start, regrouped[0].end), (0.0, 2.0));
+        let stored: TranscriptTimeline = state.db.get("job_transcript", &job.id).unwrap().unwrap();
+        assert_eq!(stored.words[0].word, "edited");
+        assert_eq!(stored.words[1].word, "layout");
     }
 
     #[tokio::test]

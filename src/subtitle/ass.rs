@@ -50,6 +50,12 @@ fn safe_text(value: &str, uppercase: bool) -> String {
     }
 }
 
+const PRESET_REFERENCE_HEIGHT: f64 = 1080.0;
+
+pub fn scale_ass_metric(value: f64, play_res_y: u32) -> f64 {
+    value.max(0.0) * play_res_y as f64 / PRESET_REFERENCE_HEIGHT
+}
+
 fn float_tags(duration_ms: i64, speed: f64) -> String {
     if duration_ms <= 0 || speed <= 0.0 {
         return String::new();
@@ -89,7 +95,10 @@ pub fn generate_ass_content(
     let shadow = to_ass_color(preset.shadow_color.as_deref().unwrap_or("#000000"), 0);
     let bold = if preset.bold { -1 } else { 0 };
     let italic = if preset.italic { -1 } else { 0 };
-    let shadow_size = preset.shadow_thickness.unwrap_or(0.0);
+    let size = scale_ass_metric(preset.size, play_y);
+    let outline_size = scale_ass_metric(preset.outline_thickness, play_y);
+    let shadow_size = scale_ass_metric(preset.shadow_thickness.unwrap_or(0.0), play_y);
+    let line_spacing = scale_ass_metric(preset.line_spacing, play_y);
 
     let mut out = format!(
         r#"[Script Info]
@@ -107,9 +116,9 @@ Style: Default,{font},{size},{primary},{highlight},{outline},{shadow},{bold},{it
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 "#,
         font = preset.font_family,
-        size = preset.size,
+        size = size,
         border = preset.border_style,
-        outline_size = preset.outline_thickness,
+        outline_size = outline_size,
     );
 
     for line in normalized {
@@ -134,10 +143,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             .map(|visual| grapheme_len(visual))
             .max()
             .unwrap_or(1) as f64;
-        let block_width = (longest_line * preset.size * 0.56).min(play_x as f64 * 0.9);
-        let block_height = (visual_lines.len() as f64 * preset.size
-            + visual_lines.len().saturating_sub(1) as f64 * preset.line_spacing)
-            .max(preset.size)
+        let block_width = (longest_line * size * 0.56).min(play_x as f64 * 0.9);
+        let block_height = (visual_lines.len() as f64 * size
+            + visual_lines.len().saturating_sub(1) as f64 * line_spacing)
+            .max(size)
             .min(play_y as f64 * 0.9);
         let min_x = (play_x as f64 * 0.05 + block_width / 2.0).round() as i32;
         let max_x = (play_x as f64 * 0.95 - block_width / 2.0).round() as i32;
@@ -309,6 +318,21 @@ mod tests {
         let ass = generate_ass_content(&[sample_line()], &preset, Some((1920, 1080)));
         assert!(ass.contains("PlayResX: 1080"));
         assert!(ass.contains("PlayResY: 1080"));
+    }
+    #[test]
+    fn visual_metrics_keep_the_same_ratio_on_every_canvas_height() {
+        let preset = Preset {
+            size: 54.0,
+            outline_thickness: 3.0,
+            shadow_thickness: Some(1.5),
+            line_spacing: 6.0,
+            ..Preset::default()
+        };
+        let hd = generate_ass_content(&[sample_line()], &preset, Some((1920, 1080)));
+        let uhd = generate_ass_content(&[sample_line()], &preset, Some((3840, 2160)));
+        assert!(hd.contains(",54,"), "{hd}");
+        assert!(uhd.contains(",108,"), "{uhd}");
+        assert!(uhd.contains(",6,3,"), "{uhd}");
     }
 
     #[test]

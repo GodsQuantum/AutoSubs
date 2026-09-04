@@ -134,9 +134,11 @@ export function loopedPreviewTime(elapsed, duration) {
   return safeElapsed % safeDuration;
 }
 
-/** @param {number} value @param {number} displayHeight @param {number} outputHeight */
-export function scalePreviewMetric(value, displayHeight, outputHeight) {
-  return Math.max(0, value) * Math.max(0, displayHeight) / Math.max(1, outputHeight);
+/** @param {number} value @param {number} displayHeight @param {number} [legacyOutputHeight] */
+export function scalePreviewMetric(value, displayHeight, legacyOutputHeight) {
+  const candidateHeight = legacyOutputHeight ?? 1080;
+  const referenceHeight = Number.isFinite(candidateHeight) ? Math.max(1, candidateHeight) : 1080;
+  return Math.max(0, value) * Math.max(0, displayHeight) / referenceHeight;
 }
 
 /** @template {{family:string,fullName?:string,weight?:number,italic?:boolean}} T @param {T[]} fonts @param {string} family @param {number} [weight] @param {boolean} [italic] @returns {T|null} */

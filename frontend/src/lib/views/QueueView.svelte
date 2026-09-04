@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, tusUpload, videoUrl } from '$lib/api';
+  import { api, renderedVideoUrl, tusUpload } from '$lib/api';
   import { dictionary } from '$lib/i18n';
   import type { Job, Preset } from '$lib/types';
   import StatusPill from '$lib/components/StatusPill.svelte';
@@ -101,7 +101,7 @@
           <div><StatusPill status={job.status}/>{#if job.progress!==undefined}<div class="progress" style={`--progress:${job.progress}%;margin-top:7px`}><span></span></div>{/if}</div>
           <div class="job-output muted small">{job.outputPath || job.attachedSidecar || '—'}</div>
           <div class="job-actions">
-            {#if job.outputPath}<a class="btn download-action" href={videoUrl(job.id)} download={outputFileName(job)} aria-label={$dictionary.downloadVideo}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg><span>{$dictionary.downloadVideo}</span></a>{/if}
+            {#if job.outputPath}<a class="btn download-action" href={renderedVideoUrl(job.id)} download={outputFileName(job)} aria-label={$dictionary.downloadVideo}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg><span>{$dictionary.downloadVideo}</span></a>{/if}
             {#if !active(job) && job.lines?.length}<button class="btn" on:click={()=>openEditor(job.id)}>{$dictionary.edit}</button>{/if}
             {#if !active(job) && job.lines?.length}<button class="btn primary" disabled={busyJobs.has(job.id)} on:click={()=>action(job,'render')}>▶ {job.status==='done'?$dictionary.reRender:$dictionary.render}</button>{/if}
             {#if ['ready','done','error','cancelled','interrupted'].includes(job.status)}<button class="btn" disabled={busyJobs.has(job.id)} on:click={()=>action(job,'retranscribe')}>↻ {$dictionary.retranscribe}</button>{/if}

@@ -2,12 +2,13 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import { dictionary } from '$lib/i18n';
-  import type { Brand, FontFace, FormatKey, Preset } from '$lib/types';
+  import type { Asset, Brand, FontFace, FormatKey, Preset } from '$lib/types';
   import FormatPreview from '$lib/components/FormatPreview.svelte';
   import { customFontMatch, verifyCustomFont } from '$lib/preview.js';
   export let presets:Preset[]=[];
   export let brands:Brand[]=[];
   export let fonts:FontFace[]=[];
+  export let assets:Asset[]=[];
   export let refresh:()=>Promise<void>=async()=>{};
   export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
 
@@ -21,6 +22,7 @@
   let fontStatus:{status:string;fileName:string}|null=null;
   $: current=presets.find(p=>p.id===selected);
   $: selectedCustomFont=customFontMatch(fonts,draft.fontFamily,draft.bold?700:400,draft.italic);
+  $: videoAssets=assets.filter(asset=>asset.mime.startsWith('video/'));
   $: if(draft.fontFamily && fontStylesheetRevision>=0) checkSelectedFont(draft.fontFamily,selectedCustomFont,fontStylesheetRevision);
   $: if(current && draft.id!==current.id) draft=clone(current);
   $: if(draft.format.key!==previousFormatKey){
@@ -36,7 +38,7 @@
   function duplicate(){draft={...clone(draft),id:'',name:`${draft.name} copy`};selected='';previousFormatKey=draft.format.key}
   async function save(){
     if(draft.format.key==='custom' && (!Number.isInteger(Number(draft.format.width))||!Number.isInteger(Number(draft.format.height))||Number(draft.format.width)<16||Number(draft.format.height)<16||Number(draft.format.width)>16384||Number(draft.format.height)>16384||Number(draft.format.width)%2!==0||Number(draft.format.height)%2!==0)){notify('error',`${$dictionary.custom}: ${$dictionary.width} × ${$dictionary.height}`);return;}
-    try{const saved=await api.savePreset(draft);selected=saved.id;draft=clone(saved);await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}
+    try{const saved=await api.savePreset({...draft,outroVideo:draft.outroVideo||undefined});selected=saved.id;draft=clone(saved);await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}
   }
   async function remove(){if(!draft.id||!confirm($dictionary.confirmDelete))return;try{await api.deletePreset(draft.id);selected='';draft=makePreset();await refresh()}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
   async function checkSelectedFont(family:string,font:FontFace|null,_stylesheetRevision:number){
@@ -70,6 +72,7 @@
         <div class="field"><label for="presets-field-3">{$dictionary.format}</label><select id="presets-field-3" class="select" bind:value={draft.format.key}><option value="source">{$dictionary.sourceFormat}</option><option value="portrait916">9:16</option><option value="landscape169">16:9</option><option value="square11">1:1</option><option value="portrait45">4:5</option><option value="custom">{$dictionary.custom}</option></select></div>
         <div class="field"><label for="presets-field-4">{$dictionary.fit}</label><select id="presets-field-4" class="select" bind:value={draft.format.fit} disabled={draft.format.key==='source'}><option value="preserve">{$dictionary.preserve}</option><option value="contain">{$dictionary.contain}</option><option value="cover">{$dictionary.cover}</option><option value="stretch">{$dictionary.stretch}</option></select></div>
         {#if draft.format.key==='custom'}<div class="field"><label for="presets-field-5">{$dictionary.width}</label><input id="presets-field-5" class="input" type="number" min="16" max="16384" step="2" bind:value={draft.format.width}/></div><div class="field"><label for="presets-field-6">{$dictionary.height}</label><input id="presets-field-6" class="input" type="number" min="16" max="16384" step="2" bind:value={draft.format.height}/></div>{/if}
+        <div class="field"><label for="presets-outro">{$dictionary.outro}</label><select id="presets-outro" class="select" value={draft.outroVideo??''} on:change={(event)=>draft={...draft,outroVideo:(event.currentTarget as HTMLSelectElement).value||undefined}}><option value="">{$dictionary.noOutro}</option>{#each videoAssets as asset}<option value={asset.id}>{asset.name}</option>{/each}</select></div>
       </div></section>
 
       <div class="grid two">
