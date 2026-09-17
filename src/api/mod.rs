@@ -11,6 +11,7 @@ pub mod uploads;
 use crate::{error::AppResult, state::AppState};
 use axum::{
     Json, Router,
+    extract::DefaultBodyLimit,
     routing::{delete, get, options, post, put},
 };
 use serde::Serialize;
@@ -113,7 +114,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/browse", get(browse::browse))
         .route(
             "/api/v1/assets",
-            get(assets::list_assets).post(assets::upload_asset),
+            get(assets::list_assets)
+                .post(assets::upload_asset)
+                // Multipart is streamed and capped by AUTOSUBS_MAX_UPLOAD_BYTES in the handler.
+                .layer(DefaultBodyLimit::disable()),
         )
         .route("/api/v1/assets/import", post(assets::import_asset))
         .route("/api/v1/assets/{id}", delete(assets::delete_asset))
@@ -134,4 +138,86 @@ pub fn router() -> Router<AppState> {
             get(settings::get_settings).post(settings::update_settings_legacy),
         )
         .route("/api/events", get(events::events))
+}
+
+#[cfg(test)]
+mod multipart_regression_tests {
+    use super::*;
+    use crate::config::Config;
+    use std::path::PathBuf;
+
+    fn config(root: &std::path::Path) -> Config {
+        Config {
+            host: "127.0.0.1".into(),
+            port: 0,
+            config_dir: root.join("config"),
+            data_dir: root.join("data"),
+            fonts_dir: root.join("fonts"),
+            dist_dir: PathBuf::new(),
+            allowed_roots: vec![root.join("data")],
+            max_render_jobs: 1,
+            max_transcription_jobs: 1,
+            max_queued_jobs: 8,
+            workflow_scan_seconds: 5,
+            file_stability_ms: 0,
+            max_upload_bytes: 10 * 1024 * 1024,
+        }
+    }
+
+    #[tokio::test]
+    async fn asset_multipart_upload_can_exceed_axum_default_body_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::load(config(dir.path())).await.unwrap();
+        let app = router().with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let payload = vec![b'x'; 3 * 1024 * 1024];
+        let part = reqwest::multipart::Part::bytes(payload)
+            .file_name("outro.mp4")
+            .mime_str("video/mp4")
+            .unwrap();
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/api/v1/assets"))
+            .multipart(reqwest::multipart::Form::new().part("file", part))
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            response.status().is_success(),
+            "status={}",
+            response.status()
+        );
+    }
+
+    #[tokio::test]
+    async fn asset_multipart_upload_still_respects_configured_maximum() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(dir.path());
+        cfg.max_upload_bytes = 1024 * 1024;
+        let state = AppState::load(cfg).await.unwrap();
+        let app = router().with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let payload = vec![b'x'; 2 * 1024 * 1024];
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/api/v1/assets"))
+            .multipart(reqwest::multipart::Form::new().part(
+                "file",
+                reqwest::multipart::Part::bytes(payload).file_name("too-large.mp4"),
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("data/assets"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
 }

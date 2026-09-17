@@ -115,7 +115,7 @@ services:
       AUTOSUBS_MAX_RENDER_JOBS: "2"
       AUTOSUBS_MAX_TRANSCRIPTION_JOBS: "2"
       AUTOSUBS_LOCAL_TRANSCRIPTION_ENABLED: "true"
-      AUTOSUBS_LOCAL_TRANSCRIPTION_URL: http://transcriber:8000/v1/audio/transcriptions
+      AUTOSUBS_LOCAL_TRANSCRIPTION_URL: http://transcriber:8000/v1
     volumes:
       - ./config:/config
       - ./data:/data
@@ -124,6 +124,8 @@ services:
 ```
 
 Provider environment variables **bootstrap an empty database only**. After first start, Settings in the UI are authoritative. That avoids a container restart unexpectedly overwriting a key/URL you changed from the UI.
+
+For OpenAI-compatible providers, use the provider base URL ending in `/v1` (for example `http://speaches:8000/v1` or `https://api.groq.com/openai/v1`). AutoSubs derives `/models` for discovery and `/audio/transcriptions` for transcription. A full `.../audio/transcriptions` URL is also accepted for backward compatibility.
 
 For migration, the old `SPEACHES_URL` variable is still accepted as a first-boot alias for `AUTOSUBS_LOCAL_TRANSCRIPTION_URL`.
 

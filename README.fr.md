@@ -186,6 +186,8 @@ Variables d'initialisation d'une DB vide : `AUTOSUBS_TRANSCRIPTION_LANGUAGE`, `A
 
 Les clés fournisseur peuvent être initialisées par environnement ou configurées ensuite dans Settings/API ; les secrets enregistrés ne sont jamais renvoyés en clair au navigateur.
 
+Pour les fournisseurs compatibles OpenAI, renseigne de préférence l'URL de base terminant par `/v1` (par exemple `http://speaches:8000/v1` ou `https://api.groq.com/openai/v1`). AutoSubs dérive automatiquement `/models` pour la découverte et `/audio/transcriptions` pour la transcription. Une URL complète finissant par `/audio/transcriptions` reste acceptée.
+
 ## API
 
 L'API actuelle vit sous `/api/v1` : jobs, suppression sans suppression des médias, retranscription/rerendu, streaming Range, annulation, sidecars, édition/regroupement/shift/export, uploads tus, catalogue de polices (`/fonts`, `/fonts/css`, `/fonts/{id}/content`), presets, marques, workflows, settings, picker de fichiers et assets. Voir la liste détaillée dans le [README anglais](README.md#api).

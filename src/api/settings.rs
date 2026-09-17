@@ -1,6 +1,7 @@
 use crate::{
     domain::{Encoder, Settings},
     error::{AppError, AppResult},
+    media::transcribe::models_endpoint,
     state::AppState,
 };
 use axum::{Json, extract::State};
@@ -171,8 +172,7 @@ pub async fn list_models(
     State(state): State<AppState>,
     Json(body): Json<ModelRequest>,
 ) -> AppResult<Json<Models>> {
-    let endpoint = body.endpoint.trim_end_matches('/');
-    let url = format!("{endpoint}/models");
+    let url = models_endpoint(&body.endpoint);
     let mut request = state.http.get(url);
     if !body.api_key.is_empty() {
         request = request.bearer_auth(body.api_key);
@@ -198,4 +198,55 @@ pub async fn list_models(
         .unwrap_or_default();
     models.sort();
     Ok(Json(Models { models }))
+}
+
+#[cfg(test)]
+mod model_endpoint_regression_tests {
+    use super::*;
+    use crate::config::Config;
+    use axum::{Json as AxumJson, Router, routing::get};
+    use serde_json::json;
+    use std::path::PathBuf;
+
+    fn config(root: &std::path::Path) -> Config {
+        Config {
+            host: "127.0.0.1".into(),
+            port: 0,
+            config_dir: root.join("config"),
+            data_dir: root.join("data"),
+            fonts_dir: root.join("fonts"),
+            dist_dir: PathBuf::new(),
+            allowed_roots: vec![root.join("data")],
+            max_render_jobs: 1,
+            max_transcription_jobs: 1,
+            max_queued_jobs: 8,
+            workflow_scan_seconds: 5,
+            file_stability_ms: 0,
+            max_upload_bytes: 10 * 1024 * 1024,
+        }
+    }
+
+    #[tokio::test]
+    async fn full_transcription_endpoint_still_discovers_v1_models() {
+        let app = Router::new().route(
+            "/v1/models",
+            get(|| async { AxumJson(json!({"data": [{"id": "demo-model"}]})) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::load(config(dir.path())).await.unwrap();
+        let response = list_models(
+            State(state),
+            Json(ModelRequest {
+                endpoint: format!("http://{addr}/v1/audio/transcriptions"),
+                api_key: String::new(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.0.models, vec!["demo-model"]);
+    }
 }

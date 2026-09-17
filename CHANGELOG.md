@@ -4,6 +4,17 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-09-17
+
+### Fixed
+
+- OpenAI-compatible `/v1` provider URLs now resolve `/models` for discovery and `/audio/transcriptions` for transcription, while full transcription URLs remain accepted.
+- Multipart asset uploads larger than Axum's default body limit are streamed correctly and remain capped by `AUTOSUBS_MAX_UPLOAD_BYTES`.
+
+### Security
+
+- Updated `rustls` to 0.23.45 and `chacha20` to 0.10.2 so the locked dependency set passes the current RustSec audit.
+
 ## [3.1.1] - 2026-09-02
 
 ### Added
