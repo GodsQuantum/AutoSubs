@@ -38,6 +38,30 @@ pub async fn extract_audio(
     run_capture(command, token).await.map(|_| ())
 }
 
+pub(crate) fn endpoint_base(url: &str) -> String {
+    let mut endpoint = url.trim().trim_end_matches('/').to_owned();
+    for suffix in ["/audio/transcriptions", "/models"] {
+        if endpoint.ends_with(suffix) {
+            endpoint.truncate(endpoint.len() - suffix.len());
+            break;
+        }
+    }
+    endpoint
+}
+
+pub(crate) fn transcription_endpoint(url: &str) -> String {
+    let endpoint = url.trim().trim_end_matches('/');
+    if endpoint.ends_with("/audio/transcriptions") {
+        endpoint.to_owned()
+    } else {
+        format!("{}/audio/transcriptions", endpoint_base(endpoint))
+    }
+}
+
+pub(crate) fn models_endpoint(url: &str) -> String {
+    format!("{}/models", endpoint_base(url))
+}
+
 async fn request_endpoint(
     url: &str,
     api_key: &str,
@@ -50,6 +74,7 @@ async fn request_endpoint(
     if url.trim().is_empty() {
         return Err(TranscriptionError::NotConfigured);
     }
+    let url = transcription_endpoint(url);
     let file = File::open(audio).await?;
     let stream = ReaderStream::new(file).map_err(std::io::Error::other);
     let body = reqwest::Body::wrap_stream(stream);
@@ -192,4 +217,38 @@ pub async fn transcribe_audio(
         return local().await;
     }
     Err(TranscriptionError::NotConfigured)
+}
+
+#[cfg(test)]
+mod endpoint_regression_tests {
+    use super::*;
+    use axum::{Json, Router, routing::post};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn base_v1_endpoint_transcribes_via_audio_transcriptions() {
+        let app = Router::new().route(
+            "/v1/audio/transcriptions",
+            post(|| async { Json(json!({"text": "ok"})) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let dir = tempfile::tempdir().unwrap();
+        let audio = dir.path().join("sample.wav");
+        tokio::fs::write(&audio, b"RIFFtest").await.unwrap();
+        let settings = Settings {
+            local_transcription_enabled: false,
+            transcription_url: format!("http://{addr}/v1"),
+            transcription_model: "demo".into(),
+            language: "fr".into(),
+            ..Settings::default()
+        };
+
+        let result = transcribe_audio(&audio, &settings, &Client::new(), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result.text.as_deref(), Some("ok"));
+    }
 }
