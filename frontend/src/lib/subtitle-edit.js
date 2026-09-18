@@ -57,3 +57,20 @@ export function mergeSubtitleLines(lines, leftIndex) {
 export function deleteSubtitleLine(lines, index) {
   return index < 0 || index >= lines.length ? lines : lines.filter((_, position) => position !== index);
 }
+
+/** @param {string} value */
+function stripVisualLineTerminalPeriod(value) {
+  return value.replace(/(?<!\.)\.(\s*)([”’"'»)\]}]*)(\s*)$/u, '$1$2$3');
+}
+
+/** Remove sentence-ending full stops at visual-line boundaries while preserving commas, !, ?, and ellipses.
+ *  This edits caption text rather than hiding punctuation at render time, so selected punctuation can be re-added manually.
+ *  @param {SubtitleLine[]} lines @returns {SubtitleLine[]}
+ */
+export function removeTerminalPeriods(lines) {
+  return lines.map(line => {
+    const next = copy(line);
+    next.text = line.text.split('\n').map(stripVisualLineTerminalPeriod).join('\n');
+    return next;
+  });
+}

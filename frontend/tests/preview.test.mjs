@@ -99,7 +99,7 @@ test('preview exposes every animation family and timed-word inputs', async () =>
   const source = await (await import('node:fs/promises')).readFile(
     new URL('../src/lib/components/FormatPreview.svelte', import.meta.url), 'utf8'
   );
-  for (const style of ['pop', 'highlight', 'bounce', 'karaoke', 'fade', 'slide-up', 'none']) {
+  for (const style of ['pop', 'highlight', 'bounce', 'karaoke', 'word-by-word', 'fade', 'slide-up', 'none']) {
     assert.match(source, new RegExp(`animation-${style.replace('-', '\\-')}`));
   }
   assert.match(source, /export let words/);
@@ -165,4 +165,20 @@ test('subtitle download keeps the server filename and surfaces API errors', asyn
     ),
     /export unavailable/
   );
+});
+
+test('word-by-word preview groups apostrophe and hyphen continuations', async () => {
+  const { wordByWordPreviewTokens } = await import('../src/lib/preview.js');
+  const tokens = [
+    { word: "l'", start: 0, end: 0.1, separator: '' },
+    { word: 'amour', start: 0.1, end: 0.4, separator: ' ' },
+    { word: 'rendez-', start: 0.5, end: 0.7, separator: ' ' },
+    { word: 'vous', start: 0.7, end: 1.0, separator: ' ' },
+    { word: 'demain', start: 1.1, end: 1.4, separator: ' ' }
+  ];
+  assert.deepEqual(wordByWordPreviewTokens(tokens), [
+    { word: "l'amour", start: 0, end: 0.4, separator: '' },
+    { word: 'rendez-vous', start: 0.5, end: 1.0, separator: ' ' },
+    { word: 'demain', start: 1.1, end: 1.4, separator: ' ' }
+  ]);
 });

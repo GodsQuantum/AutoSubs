@@ -148,6 +148,7 @@ pub enum AnimationStyle {
     Pop,
     Highlight,
     Karaoke,
+    WordByWord,
     Fade,
     SlideUp,
     Bounce,

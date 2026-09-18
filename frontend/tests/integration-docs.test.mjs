@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const root = new URL('../../', import.meta.url);
 
-test('v3.1.2 integration docs expose the shipped version and lifecycle API', async () => {
+test('v3.2.0 integration docs expose the shipped version and lifecycle API', async () => {
   const [cargo, frontend, lock, changelog, readme] = await Promise.all([
     readFile(new URL('Cargo.toml', root), 'utf8'),
     readFile(new URL('frontend/package.json', root), 'utf8'),
@@ -13,9 +13,9 @@ test('v3.1.2 integration docs expose the shipped version and lifecycle API', asy
     readFile(new URL('README.md', root), 'utf8')
   ]);
 
-  assert.match(cargo, /version = "3\.1\.2"/);
-  assert.match(frontend, /"version": "3\.1\.2"/);
-  assert.match(lock, /"version": "3\.1\.2"/g);
+  assert.match(cargo, /version = "3\.2\.0"/);
+  assert.match(frontend, /"version": "3\.2\.0"/);
+  assert.match(lock, /"version": "3\.2\.0"/g);
   for (const endpoint of ['/api/v1/fonts', '/api/v1/fonts/css', '/api/v1/jobs/{id}/retranscribe']) {
     assert.ok(readme.includes(endpoint), `missing README endpoint: ${endpoint}`);
   }

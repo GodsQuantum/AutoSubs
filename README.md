@@ -47,8 +47,8 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 - **Optional LLM correction** — spelling/punctuation correction after import/transcription while preserving line count and timings.
 - **Canonical subtitle timing engine** — one Rust implementation repairs invalid ranges, overlaps, gaps and word timings. The browser does not maintain a competing copy.
 - **Unicode-aware line grouping** — grapheme counting, Unicode line-break opportunities and French no-break rules instead of UTF-8 byte counting.
-- **ASS/libass styling** — Pop, Highlight, Bounce, Karaoke, Fade, Slide-up and plain subtitle modes; custom fonts, outline, shadow, placement and highlight colors.
-- **Durable word timing** — the canonical word-by-word timeline survives regrouping and visual edits; timed animations use the original word timings.
+- **ASS/libass styling** — Pop, Highlight, Bounce, Karaoke, **Word by word**, Fade, Slide-up and plain subtitle modes; custom fonts, outline, shadow, placement and highlight colors.
+- **Durable word timing** — the canonical word-by-word timeline survives regrouping and visual edits; timed animations use the original word timings. Word-by-word display keeps apostrophe prefixes and split hyphen compounds attached to their word.
 - **French-safe visual layout** — French syntax-aware segmentation and hard `maxLines` enforcement use explicit line breaks, so rendered captions never gain hidden extra lines.
 - **Complete job lifecycle** — edit, split, merge, delete, retranscribe and re-render jobs from the queue/editor. Deleting a job keeps its source and final output files.
 - **Source geometry invariant** — Source + Preserve keeps the primary video dimensions and aspect ratio without scale, pad, crop, or black bars.
@@ -136,7 +136,7 @@ For migration, the old `SPEACHES_URL` variable is still accepted as a first-boot
 3. Optional LLM correction runs on text only.
 4. The canonical Rust engine normalizes timings and grouping.
 5. The job reaches **Ready**. Nothing has been re-encoded yet unless you explicitly chose immediate render.
-6. Review/edit/split/merge/delete/search/replace/regroup/shift timings in Editor. The canonical word timeline remains available for later regrouping.
+6. Review/edit/split/merge/delete/search/replace/regroup/shift timings in Editor. Use **Remove final periods** for short-form caption cleanup; it preserves commas, !, ?, and ellipses and can be undone before saving. The canonical word timeline remains available for later regrouping.
 7. Export SRT/ASS/JSON without touching the video, or click **Render video**.
 8. FFmpeg/libass renders to a `.partial` staging file. `.partial` is internal media staging and is never treated as a subtitle file.
 9. Video and sidecars publish together; an optional source archive happens last. Existing jobs can be retranscribed or re-rendered from the queue.

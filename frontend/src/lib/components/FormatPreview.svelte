@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { FontFace, FormatProfile, Preset, SubtitleWord } from '$lib/types';
-  import { activeWordIndex, customFontMatch, clampPreviewPosition, demoSubtitleWords, formatRatio, karaokeProgress, loopedPreviewTime, previewSubtitleTokens, previewWidthForRatio, safeZoneGuide, subtitlePositionBounds, scalePreviewMetric, videoObjectFit } from '$lib/preview.js';
+  import { activeWordIndex, customFontMatch, clampPreviewPosition, demoSubtitleWords, formatRatio, karaokeProgress, loopedPreviewTime, previewSubtitleTokens, wordByWordPreviewTokens, previewWidthForRatio, safeZoneGuide, subtitlePositionBounds, scalePreviewMetric, videoObjectFit } from '$lib/preview.js';
 
   type SafeZoneKey = 'off'|'generic'|'tiktok'|'reels'|'shorts';
 
@@ -67,17 +67,19 @@
   $: renderedItalic = selectedFace?.italic ?? Boolean(p?.italic);
   $: timedWords = words?.length ? words : demoSubtitleWords(text).map(word=>({...word,start:word.start*demoDuration,end:word.end*demoDuration}));
   $: renderedFamily = selectedFace?.fullName ?? selectedFace?.family ?? p?.fontFamily.split(',')[0].trim() ?? "sans-serif";
-  $: previewWords = previewSubtitleTokens(text, timedWords);
+  $: animation = p?.animationStyle ?? 'none';
+  $: rawPreviewWords = previewSubtitleTokens(text, timedWords);
+  $: previewWords = animation === 'word-by-word' ? wordByWordPreviewTokens(rawPreviewWords) : rawPreviewWords;
   $: previewTime = videoSrc ? currentTime : loopedPreviewTime(demoElapsed,demoDuration);
   $: activeWord = activeWordIndex(previewWords, previewTime);
-  $: animation = p?.animationStyle ?? 'none';
   $: eventTime = Math.max(0, previewTime - (previewWords[0]?.start ?? 0));
   $: wobbleDuration = 1 / Math.max(0.05, Number(p?.wobbleSpeed) || 1);
   $: motionStyle = `--preview-time:${previewTime};--event-time:${eventTime};--wobble-duration:${wobbleDuration}s;`;
   $: fontSize = p ? scalePreviewMetric(p.size,displayHeight) : 18;
   $: lineHeight = 1.08;
-  $: visualLines = Math.max(1, text.split('\n').filter(line=>line.trim()).length);
-  $: longestLine = Math.max(1, ...text.split('\n').map(line=>Array.from(line).length));
+  $: layoutText = animation === 'word-by-word' ? (previewWords[activeWord]?.word ?? text) : text;
+  $: visualLines = Math.max(1, layoutText.split('\n').filter(line=>line.trim()).length);
+  $: longestLine = Math.max(1, ...layoutText.split('\n').map(line=>Array.from(line).length));
   $: estimatedBlockWidth = Math.min(displayWidth * .9, longestLine * fontSize * .56);
   $: estimatedBlockHeight = visualLines * fontSize + Math.max(0,visualLines-1) * scalePreviewMetric(p?.lineSpacing ?? 0,displayHeight);
   $: positionBounds = subtitlePositionBounds(displayWidth, displayHeight, estimatedBlockWidth, estimatedBlockHeight);
@@ -203,9 +205,9 @@
         on:pointerup={stopDrag}
         on:pointercancel={stopDrag}
         on:keydown={nudgePosition}
-      ><span class:floating={p?.floating} class="preview-floating" style={motionStyle}><span class={`preview-animation-inner animation-${animation}`} style={motionStyle}>{#each previewWords as word, i}{#if word.separator}<span aria-hidden="true">{word.separator}</span>{/if}<span class:active={i === activeWord} class={`preview-word word-animation-${animation}`} style={`${motionStyle}--word-time:${Math.max(0,previewTime-word.start)};--base-color:${p?.baseColor ?? '#fff'};--highlight-color:${p?.highlightColor ?? '#3dd7cf'};--karaoke-progress:${karaokeProgress(previewTime,word.start,word.end)}%;color:${i === activeWord && (animation === 'pop' || animation === 'highlight' || animation === 'bounce' || animation === 'karaoke') ? (p?.highlightColor ?? '#3dd7cf') : (p?.baseColor ?? '#fff')}`}>{word.word}</span>{/each}</span></span></button>
+      ><span class:floating={p?.floating} class="preview-floating" style={motionStyle}><span class={`preview-animation-inner animation-${animation}`} style={motionStyle}>{#each previewWords as word, i}{#if animation !== 'word-by-word' || i === activeWord}{#if animation !== 'word-by-word' && word.separator}<span aria-hidden="true">{word.separator}</span>{/if}<span class:active={i === activeWord} class={`preview-word word-animation-${animation}`} style={`${motionStyle}--word-time:${Math.max(0,previewTime-word.start)};--base-color:${p?.baseColor ?? '#fff'};--highlight-color:${p?.highlightColor ?? '#3dd7cf'};--karaoke-progress:${karaokeProgress(previewTime,word.start,word.end)}%;color:${i === activeWord && (animation === 'pop' || animation === 'highlight' || animation === 'bounce' || animation === 'karaoke') ? (p?.highlightColor ?? '#3dd7cf') : (p?.baseColor ?? '#fff')}`}>{word.word}</span>{/if}{/each}</span></span></button>
     {:else}
-      <div class="preview-subtitle" style={subtitleStyle}><span class:floating={p?.floating} class="preview-floating" style={motionStyle}><span class={`preview-animation-inner animation-${animation}`} style={motionStyle}>{#each previewWords as word, i}{#if word.separator}<span aria-hidden="true">{word.separator}</span>{/if}<span class:active={i === activeWord} class={`preview-word word-animation-${animation}`} style={`${motionStyle}--word-time:${Math.max(0,previewTime-word.start)};--base-color:${p?.baseColor ?? '#fff'};--highlight-color:${p?.highlightColor ?? '#3dd7cf'};--karaoke-progress:${karaokeProgress(previewTime,word.start,word.end)}%;color:${i === activeWord && (animation === 'pop' || animation === 'highlight' || animation === 'bounce' || animation === 'karaoke') ? (p?.highlightColor ?? '#3dd7cf') : (p?.baseColor ?? '#fff')}`}>{word.word}</span>{/each}</span></span></div>
+      <div class="preview-subtitle" style={subtitleStyle}><span class:floating={p?.floating} class="preview-floating" style={motionStyle}><span class={`preview-animation-inner animation-${animation}`} style={motionStyle}>{#each previewWords as word, i}{#if animation !== 'word-by-word' || i === activeWord}{#if animation !== 'word-by-word' && word.separator}<span aria-hidden="true">{word.separator}</span>{/if}<span class:active={i === activeWord} class={`preview-word word-animation-${animation}`} style={`${motionStyle}--word-time:${Math.max(0,previewTime-word.start)};--base-color:${p?.baseColor ?? '#fff'};--highlight-color:${p?.highlightColor ?? '#3dd7cf'};--karaoke-progress:${karaokeProgress(previewTime,word.start,word.end)}%;color:${i === activeWord && (animation === 'pop' || animation === 'highlight' || animation === 'bounce' || animation === 'karaoke') ? (p?.highlightColor ?? '#3dd7cf') : (p?.baseColor ?? '#fff')}`}>{word.word}</span>{/if}{/each}</span></span></div>
     {/if}
   {/if}
 </div>
@@ -232,7 +234,7 @@
   .word-animation-pop.active { animation:preview-pop .32s ease both; animation-delay:calc(var(--word-time) * -1s); animation-play-state:paused; }
   .word-animation-bounce.active { animation:preview-bounce .38s ease both; animation-delay:calc(var(--word-time) * -1s); animation-play-state:paused; }
   .word-animation-karaoke.active { color:transparent !important; background:linear-gradient(90deg,var(--highlight-color) 0 var(--karaoke-progress),var(--base-color) var(--karaoke-progress)); background-clip:text; -webkit-background-clip:text; }
-  .animation-highlight, .animation-karaoke, .animation-none { animation:none; }
+  .animation-highlight, .animation-karaoke, .animation-word-by-word, .animation-none { animation:none; }
   @keyframes preview-fade { from { opacity:0; } to { opacity:1; } }
   @keyframes preview-slide-up { from { opacity:0; transform:translateY(18px); } to { opacity:1; transform:translateY(0); } }
   @keyframes preview-pop { 0% { transform:scale(1); } 43% { transform:scale(1.12); } 100% { transform:scale(1); } }
