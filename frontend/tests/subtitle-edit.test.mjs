@@ -28,3 +28,27 @@ test('mergeSubtitleLines combines adjacent timed words', () => {
 test('deleteSubtitleLine removes only the selected block', () => {
   assert.deepEqual(deleteSubtitleLine([line, { ...line, id: 5 }], 0).map(({ id }) => id), [5]);
 });
+
+test('removeTerminalPeriods strips only caption-ending full stops', async () => {
+  const { removeTerminalPeriods } = await import('../src/lib/subtitle-edit.js');
+  const input = [
+    { ...line, id: 10, text: 'Bonjour.' },
+    { ...line, id: 11, text: 'Ça va !' },
+    { ...line, id: 12, text: 'Vraiment ?' },
+    { ...line, id: 13, text: 'Oui,' },
+    { ...line, id: 14, text: 'Attends...' },
+    { ...line, id: 15, text: 'M. Dupont.' },
+    { ...line, id: 16, text: '« Bonjour. »' },
+    { ...line, id: 17, text: 'Première ligne.\nDeuxième ligne.' }
+  ];
+  assert.deepEqual(removeTerminalPeriods(input).map(({ text }) => text), [
+    'Bonjour',
+    'Ça va !',
+    'Vraiment ?',
+    'Oui,',
+    'Attends...',
+    'M. Dupont',
+    '« Bonjour »',
+    'Première ligne\nDeuxième ligne'
+  ]);
+});

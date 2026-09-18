@@ -2,7 +2,7 @@
   import { api, sourceVideoUrl, subtitleExportUrl } from '$lib/api';
   import { dictionary } from '$lib/i18n';
   import { subtitlesToVtt } from '$lib/captions.js';
-  import { splitSubtitleLine, mergeSubtitleLines, deleteSubtitleLine } from '$lib/subtitle-edit.js';
+  import { splitSubtitleLine, mergeSubtitleLines, deleteSubtitleLine, removeTerminalPeriods } from '$lib/subtitle-edit.js';
   import { fetchDownload, saveDownload } from '$lib/download.js';
   import type { Asset, Brand, FontFace, FormatKey, FitMode, FormatProfile, Job, JobOutro, Preset, SubtitleLine } from '$lib/types';
   import StatusPill from '$lib/components/StatusPill.svelte';
@@ -42,6 +42,7 @@
   let fileInput:HTMLInputElement;
   let textareas:HTMLTextAreaElement[]=[];
   let report:{repairedLineOverlaps:number;retimedWordLines:number;droppedEmptyLines:number}|undefined;
+  let punctuationBackup:SubtitleLine[]|undefined;
   let previewFormat:FormatProfile={key:'source',fit:'preserve'};
 
   $: if(job && job.id!==loadedId){ loadedId=job.id; hydrate(job); }
@@ -59,7 +60,7 @@
   $: previewFormat={key:formatKey,fit:formatKey==='source'?'preserve':fit,width:formatKey==='custom'?Number(customWidth):undefined,height:formatKey==='custom'?Number(customHeight):undefined};
 
   function hydrate(j:Job){
-    lines=(j.lines??[]).map(l=>({...l,words:l.words?.map(w=>({...w}))})); dirty=false; report=undefined;
+    lines=(j.lines??[]).map(l=>({...l,words:l.words?.map(w=>({...w}))})); dirty=false; report=undefined; punctuationBackup=undefined;
     selectedPreset=j.presetId??''; formatKey=j.format?.key??'source'; fit=j.format?.fit??'preserve'; previousFormatKey=formatKey; customWidth=j.format?.width??1080; customHeight=j.format?.height??1920;
     const p=presets.find(p=>p.id===selectedPreset); if(p){maxChars=p.maxChars;maxLines=p.maxLines;}
     outroChoice=j.outro?.mode==='asset'?`asset:${j.outro.assetId}`:j.outro?.mode??'inherit';
@@ -70,6 +71,22 @@
   async function regroup(){if(!job)return;try{if(dirty && !(await save()))return;lines=await api.regroup(job.id,maxChars,maxLines);dirty=false;await refresh()}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
   function shiftAll(){const d=Number(shiftMs||0)/1000;lines=lines.map(l=>({...l,start:Math.max(0,l.start+d),end:Math.max(.02,l.end+d),words:l.words?.map(w=>({...w,start:Math.max(0,w.start+d),end:Math.max(.02,w.end+d)}))}));dirty=true}
   function replaceText(){if(!search)return; lines=lines.map(l=>({...l,text:l.text.split(search).join(replace)}));dirty=true}
+  function removeFinalPeriods(){
+    const before=lines.map(l=>({...l,words:l.words?.map(w=>({...w}))}));
+    const next=removeTerminalPeriods(lines);
+    const changed=next.reduce((count,line,index)=>count+(line.text!==lines[index]?.text?1:0),0);
+    if(!changed)return;
+    punctuationBackup=before;
+    lines=next;
+    dirty=true;
+    notify('info', `${changed} · ${$dictionary.finalPeriodsRemoved}`);
+  }
+  function undoPunctuationCleanup(){
+    if(!punctuationBackup)return;
+    lines=punctuationBackup;
+    punctuationBackup=undefined;
+    dirty=true;
+  }
   function split(i:number){const textarea=textareas[i];lines=splitSubtitleLine(lines,i,textarea?.selectionStart??Math.floor(lines[i].text.length/2));dirty=true}
   function merge(i:number){lines=mergeSubtitleLines(lines,i);dirty=true}
   function remove(i:number){lines=deleteSubtitleLine(lines,i);dirty=true}
@@ -113,6 +130,8 @@
               <div class="field" style="flex:1"><label for="editor-field-1">{$dictionary.search}</label><input id="editor-field-1" class="input" bind:value={search}/></div>
               <div class="field" style="flex:1"><label for="editor-field-2">{$dictionary.replace}</label><input id="editor-field-2" class="input" bind:value={replace}/></div>
               <button class="btn" disabled={locked||!search} on:click={replaceText}>{$dictionary.replaceAll}</button>
+              <button class="btn" disabled={locked||!lines.length} on:click={removeFinalPeriods}>−. {$dictionary.removeFinalPeriods}</button>
+              {#if punctuationBackup}<button class="btn ghost" disabled={locked} on:click={undoPunctuationCleanup}>↶ {$dictionary.undoPunctuation}</button>{/if}
               <div class="field" style="width:105px"><label for="editor-field-3">{$dictionary.shift}</label><input id="editor-field-3" class="input" type="number" bind:value={shiftMs}/></div>
               <button class="btn" disabled={locked} on:click={shiftAll}>± {$dictionary.milliseconds}</button>
             </div>

@@ -121,6 +121,30 @@ export function previewSubtitleTokens(text, words = []) {
   });
 }
 
+/** Group fragments that should read as one spoken word for word-by-word captions.
+ *  Handles French elisions (l' + amour), split hyphen compounds (rendez- + vous / peut + -être),
+ *  and standalone closing punctuation without creating punctuation-only frames.
+ *  @param {Array<{word:string,start:number,end:number,separator?:string}>} tokens
+ */
+export function wordByWordPreviewTokens(tokens) {
+  /** @type {Array<{word:string,start:number,end:number,separator?:string}>} */
+  const units = [];
+  const closingPunctuation = /^[,.;:!?…)}\]»”]+$/u;
+  const joinsNext = /['’\-‐‑]$/u;
+  const joinsPrevious = /^[\-‐‑]/u;
+  for (const token of tokens) {
+    const current = { ...token };
+    const previous = units.at(-1);
+    if (previous && (joinsNext.test(previous.word) || joinsPrevious.test(current.word) || closingPunctuation.test(current.word))) {
+      previous.word += current.word;
+      previous.end = Math.max(previous.end, current.end);
+      continue;
+    }
+    units.push(current);
+  }
+  return units;
+}
+
 /** @param {number} time @param {number} start @param {number} end */
 export function karaokeProgress(time, start, end) {
   const duration = Math.max(0.001, end - start);

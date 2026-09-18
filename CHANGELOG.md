@@ -4,6 +4,18 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-09-18
+
+### Added
+
+- New **Word by word** caption animation: only the currently spoken unit is displayed, using canonical word timings.
+- Word-by-word grouping keeps French elisions and split compounds together (for example `l'` + `amour` and `rendez-` + `vous`) instead of flashing orphan fragments.
+- Editor action to remove sentence-ending full stops in one pass while preserving commas, `!`, `?`, and ellipses, with a one-step undo before saving.
+
+### Changed
+
+- Preset and live video previews now mirror the word-by-word grouping used by the ASS/libass renderer.
+
 ## [3.1.2] - 2026-09-17
 
 ### Fixed

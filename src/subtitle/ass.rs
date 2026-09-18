@@ -1,4 +1,4 @@
-use crate::domain::{AnimationStyle, Preset, SubtitleLine};
+use crate::domain::{AnimationStyle, Preset, SubtitleLine, SubtitleWord};
 use crate::subtitle::normalize::{NormalizeOptions, normalize_subtitles};
 use crate::subtitle::segment::grapheme_len;
 
@@ -75,6 +75,59 @@ fn float_tags(duration_ms: i64, speed: f64) -> String {
     tags
 }
 
+fn is_closing_punctuation_token(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.chars().all(|c| {
+            matches!(
+                c,
+                ',' | '.' | ';' | ':' | '!' | '?' | '…' | ')' | ']' | '}' | '»' | '”'
+            )
+        })
+}
+
+fn word_by_word_units(line: &SubtitleLine) -> Vec<SubtitleWord> {
+    let tokens: Vec<&str> = line.text.split_whitespace().collect();
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+
+    let source_words = line.words.as_deref().unwrap_or(&[]);
+    let fallback_duration = ((line.end - line.start).max(0.001)) / tokens.len() as f64;
+    let mut units: Vec<SubtitleWord> = Vec::with_capacity(tokens.len());
+
+    for (index, token) in tokens.into_iter().enumerate() {
+        let (start, end) = source_words
+            .get(index)
+            .map(|word| (word.start, word.end))
+            .unwrap_or_else(|| {
+                let start = line.start + fallback_duration * index as f64;
+                (start, (start + fallback_duration).min(line.end))
+            });
+        let current = SubtitleWord {
+            word: token.to_string(),
+            start,
+            end,
+        };
+
+        if let Some(previous) = units.last_mut() {
+            let left = previous.word.trim_end();
+            let right = current.word.trim_start();
+            let joins = left.ends_with(['\'', '’', '-', '‐', '‑'])
+                || right.starts_with(['-', '‐', '‑'])
+                || is_closing_punctuation_token(right);
+            if joins {
+                previous.word = format!("{left}{right}");
+                previous.end = previous.end.max(current.end);
+                continue;
+            }
+        }
+        units.push(current);
+    }
+
+    units
+}
+
 pub fn generate_ass_content(
     lines: &[SubtitleLine],
     preset: &Preset,
@@ -138,14 +191,32 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             continue;
         }
         let words = line.words.clone().unwrap_or_default();
-        let longest_line = visual_lines
-            .iter()
-            .map(|visual| grapheme_len(visual))
-            .max()
-            .unwrap_or(1) as f64;
+        let word_units = if preset.animation_style == AnimationStyle::WordByWord {
+            word_by_word_units(&line)
+        } else {
+            Vec::new()
+        };
+        let longest_line = if preset.animation_style == AnimationStyle::WordByWord {
+            word_units
+                .iter()
+                .map(|word| grapheme_len(&word.word))
+                .max()
+                .unwrap_or(1) as f64
+        } else {
+            visual_lines
+                .iter()
+                .map(|visual| grapheme_len(visual))
+                .max()
+                .unwrap_or(1) as f64
+        };
+        let visual_line_count = if preset.animation_style == AnimationStyle::WordByWord {
+            1
+        } else {
+            visual_lines.len()
+        };
         let block_width = (longest_line * size * 0.56).min(play_x as f64 * 0.9);
-        let block_height = (visual_lines.len() as f64 * size
-            + visual_lines.len().saturating_sub(1) as f64 * line_spacing)
+        let block_height = (visual_line_count as f64 * size
+            + visual_line_count.saturating_sub(1) as f64 * line_spacing)
             .max(size)
             .min(play_y as f64 * 0.9);
         let min_x = (play_x as f64 * 0.05 + block_width / 2.0).round() as i32;
@@ -157,6 +228,37 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         let name = format!("autosubs:{}", line.id);
 
         match preset.animation_style {
+            AnimationStyle::WordByWord => {
+                for (index, unit) in word_units.iter().enumerate() {
+                    let start = unit.start.max(line.start).min(line.end);
+                    if start >= line.end {
+                        continue;
+                    }
+                    let next_start = word_units
+                        .get(index + 1)
+                        .map(|word| word.start)
+                        .unwrap_or(line.end);
+                    let end = next_start.min(line.end).max((start + 0.001).min(line.end));
+                    if end <= start {
+                        continue;
+                    }
+                    let float = if preset.floating {
+                        float_tags(((end - start) * 1000.0) as i64, preset.wobble_speed)
+                    } else {
+                        String::new()
+                    };
+                    let rendered = format!(
+                        "{{\\q2\\pos({x},{y})}}{float}{}",
+                        safe_text(&unit.word, preset.uppercase)
+                    );
+                    out.push_str(&format!(
+                        "Dialogue: 0,{},{},Default,{name},0,0,0,,{}\n",
+                        format_ass_time(start),
+                        format_ass_time(end),
+                        rendered
+                    ));
+                }
+            }
             AnimationStyle::Pop | AnimationStyle::Highlight | AnimationStyle::Bounce => {
                 for active in 0..total_words {
                     let duration = (line.end - line.start) / total_words as f64;
@@ -441,5 +543,57 @@ mod tests {
         let ass = generate_ass_content(&[sample_line()], &preset, Some((1920, 1080)));
         assert!(ass.contains("\\t(0,70,\\fscy125\\fscx105)\\t(70,150,\\fscy100\\fscx100)"));
         assert!(ass.matches("Dialogue:").count() >= 2);
+    }
+
+    #[test]
+    fn word_by_word_displays_one_spoken_unit_and_joins_french_prefixes() {
+        let line = SubtitleLine {
+            id: 9,
+            start: 0.0,
+            end: 2.0,
+            text: "l' amour rendez- vous demain".into(),
+            words: Some(vec![
+                crate::domain::SubtitleWord {
+                    word: "l'".into(),
+                    start: 0.0,
+                    end: 0.1,
+                },
+                crate::domain::SubtitleWord {
+                    word: "amour".into(),
+                    start: 0.1,
+                    end: 0.4,
+                },
+                crate::domain::SubtitleWord {
+                    word: "rendez-".into(),
+                    start: 0.5,
+                    end: 0.7,
+                },
+                crate::domain::SubtitleWord {
+                    word: "vous".into(),
+                    start: 0.7,
+                    end: 1.0,
+                },
+                crate::domain::SubtitleWord {
+                    word: "demain".into(),
+                    start: 1.1,
+                    end: 1.5,
+                },
+            ]),
+        };
+        let preset = Preset {
+            animation_style: AnimationStyle::WordByWord,
+            uppercase: false,
+            ..Preset::default()
+        };
+        let ass = generate_ass_content(&[line], &preset, Some((1920, 1080)));
+        let dialogues: Vec<_> = ass
+            .lines()
+            .filter(|line| line.starts_with("Dialogue:"))
+            .collect();
+        assert_eq!(dialogues.len(), 3, "{ass}");
+        assert!(dialogues[0].contains("l'amour"), "{ass}");
+        assert!(dialogues[1].contains("rendez-vous"), "{ass}");
+        assert!(dialogues[2].contains("demain"), "{ass}");
+        assert!(!dialogues.iter().any(|line| line.ends_with("l'")), "{ass}");
     }
 }
