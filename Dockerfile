@@ -46,5 +46,5 @@ COPY --from=frontend /src/frontend/build /app/frontend
 USER 1000:1000
 EXPOSE 3000
 STOPSIGNAL SIGTERM
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["curl","--fail","--silent","--show-error","http://127.0.0.1:3000/api/v1/health"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["curl","--fail","--silent","--show-error","http://127.0.0.1:3000/api/v1/health"]
 ENTRYPOINT ["/app/autosubs"]
