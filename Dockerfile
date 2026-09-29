@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS frontend
+FROM node:24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -15,7 +15,7 @@ COPY rust-toolchain.toml ./
 COPY src ./src
 RUN cargo build --release --locked
 
-FROM debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS runtime
+FROM debian:sid-slim@sha256:ec3fa4e0b2987ae47be353f56854191e300261915470e40165b1c906d22a65db AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_HOST=0.0.0.0 \
     AUTOSUBS_PORT=3000 \
@@ -26,8 +26,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_ALLOWED_ROOTS=/data:/media \
     HOME=/tmp \
     XDG_CACHE_HOME=/tmp/.cache
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg fontconfig fonts-dejavu-core mesa-va-drivers intel-media-va-driver \
+RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
+ && printf '%s\n' 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260929T000000Z sid main' > /etc/apt/sources.list \
+ && apt-get -o Acquire::Check-Valid-Until=false update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl fontconfig fonts-dejavu-core \
+      ffmpeg=7:9.0.2-1 \
+      mesa-va-drivers=26.2.3-2 \
+      mesa-vulkan-drivers=26.2.3-2 \
+      intel-media-va-driver=26.2.4+dfsg1-1 \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 1000 autosubs \
  && useradd --uid 1000 --gid 1000 --home-dir /nonexistent --shell /usr/sbin/nologin autosubs \

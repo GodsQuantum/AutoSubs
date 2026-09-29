@@ -4,7 +4,7 @@ use crate::domain::{
 };
 use crate::media::process::ProcessError;
 use crate::media::transcribe::{TranscriptionError, extract_audio, transcribe_audio};
-use crate::media::{build_render_plan, probe_media, render_video};
+use crate::media::{auto_encoder_order, build_render_plan, probe_media, render_video};
 use crate::state::AppState;
 use crate::subtitle::{
     NormalizeOptions,
@@ -409,17 +409,14 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
         job.error = None;
     })?;
     let settings = state.settings.read().await.clone();
-    let mut plan = build_render_plan(
-        &input,
-        &staging_video,
-        &work_ass,
-        &preset,
-        &settings.encoder,
-        &caps,
-        &source,
-        outro.as_deref().zip(outro_probe.as_ref()),
-        Some(&state.config.fonts_dir),
-    )?;
+    let mut render_order = if settings.encoder.kind == EncoderKind::Auto {
+        auto_encoder_order(&caps)
+    } else {
+        vec![settings.encoder.kind.clone()]
+    };
+    if settings.encoder.kind == EncoderKind::Auto && !render_order.contains(&EncoderKind::Libx264) {
+        render_order.push(EncoderKind::Libx264);
+    }
     let (progress_tx, mut progress_rx) = mpsc::channel(16);
     let progress_state = state.clone();
     let progress_id = id.to_owned();
@@ -431,32 +428,42 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
         }
     });
     let duration = source.duration + outro_probe.as_ref().map(|p| p.duration).unwrap_or(0.0);
-    let first = render_video(&plan, duration, token, Some(progress_tx.clone())).await;
-    let result = match first {
-        Ok(()) => Ok(()),
-        Err(error)
-            if settings.encoder.kind == EncoderKind::Auto
-                && plan.encoder != EncoderKind::Libx264
-                && !token.is_cancelled() =>
-        {
-            tracing::warn!(job_id = id, encoder = ?plan.encoder, error = %error, "hardware render failed; retrying once with libx264");
-            let mut fallback = settings.encoder.clone();
-            fallback.kind = EncoderKind::Libx264;
-            plan = build_render_plan(
-                &input,
-                &staging_video,
-                &work_ass,
-                &preset,
-                &fallback,
-                &caps,
-                &source,
-                outro.as_deref().zip(outro_probe.as_ref()),
-                Some(&state.config.fonts_dir),
-            )?;
-            render_video(&plan, duration, token, Some(progress_tx)).await
+    let mut result = Ok(());
+    for (attempt, encoder_kind) in render_order.iter().cloned().enumerate() {
+        let mut encoder = settings.encoder.clone();
+        encoder.kind = encoder_kind.clone();
+        let plan = build_render_plan(
+            &input,
+            &staging_video,
+            &work_ass,
+            &preset,
+            &encoder,
+            &caps,
+            &source,
+            outro.as_deref().zip(outro_probe.as_ref()),
+            Some(&state.config.fonts_dir),
+        )?;
+        match render_video(&plan, duration, token, Some(progress_tx.clone())).await {
+            Ok(()) => {
+                result = Ok(());
+                break;
+            }
+            Err(error) => {
+                let is_last = attempt + 1 == render_order.len();
+                if token.is_cancelled() || is_last {
+                    result = Err(error);
+                    break;
+                }
+                tracing::warn!(
+                    job_id = id,
+                    encoder = ?encoder_kind,
+                    next_encoder = ?render_order[attempt + 1],
+                    error = %error,
+                    "render backend failed; trying next validated encoder"
+                );
+            }
         }
-        Err(error) => Err(error),
-    };
+    }
     progress_task.abort();
     result.map_err(|e| anyhow!(e)).context("render video")?;
     if token.is_cancelled() {
