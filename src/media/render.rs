@@ -466,9 +466,9 @@ async fn benchmark_software_encoder(
         "-f",
         "lavfi",
         "-i",
-        "color=c=black:s=2160x3840:r=30",
+        "testsrc2=s=2160x3840:r=30",
         "-frames:v",
-        "120",
+        "180",
         "-an",
         "-c:v",
         name,
@@ -508,11 +508,11 @@ async fn benchmark_vaapi(token: &CancellationToken) -> Option<(String, u64)> {
             "-f",
             "lavfi",
             "-i",
-            "color=c=black:s=2160x3840:r=30",
+            "testsrc2=s=2160x3840:r=30",
             "-vf",
             "format=nv12,hwupload",
             "-frames:v",
-            "120",
+            "180",
             "-an",
             "-c:v",
             "h264_vaapi",
@@ -548,11 +548,11 @@ async fn benchmark_vulkan(token: &CancellationToken) -> Option<(String, u64)> {
             "-f",
             "lavfi",
             "-i",
-            "color=c=black:s=2160x3840:r=30",
+            "testsrc2=s=2160x3840:r=30",
             "-vf",
             "format=nv12,hwupload",
             "-frames:v",
-            "120",
+            "180",
             "-an",
             "-c:v",
             "h264_vulkan",
@@ -571,6 +571,17 @@ async fn benchmark_vulkan(token: &CancellationToken) -> Option<(String, u64)> {
         }
     }
     best
+}
+
+fn encoder_stability_priority(encoder: &EncoderKind) -> u8 {
+    match encoder {
+        EncoderKind::NvencH264 => 0,
+        EncoderKind::QsvH264 => 1,
+        EncoderKind::VaapiH264 => 2,
+        EncoderKind::VulkanH264 => 3,
+        EncoderKind::AmfH264 => 4,
+        _ => 10,
+    }
 }
 
 pub async fn detect_encoder_capabilities(token: &CancellationToken) -> EncoderCapabilities {
@@ -632,7 +643,15 @@ pub async fn detect_encoder_capabilities(token: &CancellationToken) -> EncoderCa
             ranked.push((ms, encoder));
         }
     }
-    ranked.sort_by_key(|(ms, _)| *ms);
+    ranked.sort_by(|(a_ms, a_encoder), (b_ms, b_encoder)| {
+        let fastest = (*a_ms).min(*b_ms).max(1);
+        let delta = a_ms.abs_diff(*b_ms);
+        if delta.saturating_mul(100) <= fastest.saturating_mul(5) {
+            encoder_stability_priority(a_encoder).cmp(&encoder_stability_priority(b_encoder))
+        } else {
+            a_ms.cmp(b_ms)
+        }
+    });
     let auto_encoder_order = ranked.into_iter().map(|(_, encoder)| encoder).collect();
 
     let mut filters = Command::new("ffmpeg");
