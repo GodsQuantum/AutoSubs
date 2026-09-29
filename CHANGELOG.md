@@ -4,6 +4,23 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+### Added
+
+- Runtime encoder probes verify that NVENC, QSV, VA-API and AMF can actually encode in the current host/container instead of trusting FFmpeg's compiled encoder list.
+- VA-API runtime probing records the usable `/dev/dri/renderD*` device and render plans upload filtered subtitle frames correctly before hardware encoding.
+- The runtime image ships Mesa VA-API drivers for AMD and Intel's media VA-API driver so exposed Linux GPUs can be used without ad-hoc package installation.
+
+### Changed
+
+- Standard social format choices are adaptive ratios rather than forced 1080p canvases: matching source ratios keep the original resolution, while ratio changes use the largest exact even canvas that fits within the source dimensions.
+- Hardware encoder choices that fail runtime probing are disabled in Settings; libx264 remains the universal fallback.
+
+### Fixed
+
+- Live job/file UI synchronization now listens to the backend's named `job` SSE events correctly and refreshes an open server file picker as job state changes.
+- Job errors retain the underlying error chain instead of collapsing to a generic top-level message such as `render video`.
+
+
 ## [3.2.0] - 2026-09-18
 
 ### Added

@@ -52,7 +52,7 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 - **French-safe visual layout** — French syntax-aware segmentation and hard `maxLines` enforcement use explicit line breaks, so rendered captions never gain hidden extra lines.
 - **Complete job lifecycle** — edit, split, merge, delete, retranscribe and re-render jobs from the queue/editor. Deleting a job keeps its source and final output files.
 - **Source geometry invariant** — Source + Preserve keeps the primary video dimensions and aspect ratio without scale, pad, crop, or black bars.
-- **Real format profiles** — Source, 9:16, 16:9, 1:1, 4:5 and custom canvases. Source geometry is preserved by default; `contain`, `cover` and `stretch` are explicit choices.
+- **Adaptive format profiles** — Source, 9:16, 16:9, 1:1, 4:5 and custom canvases. Matching source ratios keep their original pixel resolution; ratio changes use the largest exact, even canvas that fits inside the source dimensions, avoiding gratuitous upscale/downscale. `contain`, `cover` and `stretch` remain explicit choices.
 - **Brands** — group logo/outro assets and choose a default preset per output format.
 - **Workflows** — independent watch/output/archive folders, Brand/preset resolution, native filesystem events plus periodic reconciliation for NFS-mounted folders.
 - **No archive-on-failure** — a source is archived only after the final video and subtitle sidecars have been published successfully.
@@ -60,7 +60,7 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 - **Persistent jobs** — SQLite keeps queue state, settings, workflows, assets and events across restarts. Active jobs become `interrupted` after an unexpected restart instead of pretending they completed.
 - **Real cancellation** — waiting jobs and running FFmpeg/network work use cancellation tokens; a cancelled job does not later consume a freed encode slot.
 - **Machine-readable render progress** — progress comes from FFmpeg's `-progress` protocol, not regexes against human stderr output.
-- **Hardware encoder discovery** — AutoSubs probes the FFmpeg build and can select NVENC, QSV, VA-API, AMF or libx264 according to what is actually present. `auto` falls back once to libx264 if hardware launch fails.
+- **Runtime-tested hardware encoder discovery** — AutoSubs does not trust `ffmpeg -encoders` alone: it performs a real one-frame encode probe before marking NVENC, QSV, VA-API or AMF usable. VA-API also probes accessible `/dev/dri/renderD*` devices. `auto` therefore selects hardware that actually works in the current host/container, with one libx264 fallback if a later hardware render still fails.
 - **Outro normalization** — main video and outro are normalized into one concat graph so different dimensions/FPS/audio layouts do not require a fragile stream-copy concat.
 - **EN / FR UI** — instant browser-local language switch. This is separate from the transcription language setting.
 
@@ -175,11 +175,11 @@ If any preparation or render step fails, the original source stays where it was.
 
 ## FFmpeg and hardware acceleration
 
-The runtime image includes FFmpeg with libass. On startup AutoSubs probes filters, hardware accelerators and H.264 encoders. The Settings page shows what this particular container can actually use.
+The runtime image includes FFmpeg with libass. On startup AutoSubs probes filters and performs a real one-frame encode test for each supported hardware path; a codec merely being compiled into FFmpeg is not treated as proof that its driver/device is usable. The Settings page reports runtime-tested capabilities for this particular container.
 
-For Intel/AMD Linux acceleration, expose `/dev/dri` to the container and add the host video/render groups as required by your distro. For NVIDIA, use the NVIDIA Container Toolkit and expose the GPU in your Compose stack. Hardware access is intentionally not enabled by default in the example Compose.
+For Intel/AMD Linux acceleration, expose `/dev/dri` to the container and add the host video/render groups as required by your distro. The published Debian image includes Mesa VA-API drivers for AMD and the Intel media VA-API driver, so a usable device can be runtime-probed without installing drivers inside the container. For NVIDIA, use the NVIDIA Container Toolkit and expose the GPU in your Compose stack. Hardware access is intentionally not enabled by default in the example Compose.
 
-`auto` is conservative: if a selected hardware encoder fails to launch, that render is retried once with `libx264`. It does not silently loop through six encoders.
+`auto` is conservative: only runtime-tested hardware is eligible. If a selected hardware encoder later fails during a real render, that render is retried once with `libx264`. It does not silently loop through six encoders. For 4K software rendering, avoid hard 1 GiB container limits: HEVC decode + libass + libx264 can transiently exceed that.
 
 ## ⚙️ Configuration
 

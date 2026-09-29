@@ -8,14 +8,14 @@ COPY frontend/ ./
 COPY Cargo.toml CHANGELOG.md README.md /src/
 RUN npm run check && npm test && npm run build
 
-FROM rust:1.98.0-trixie@sha256:7f7a53a25a0319dd8284e279d529d45759cb384d59b14cc6806132910f45522e AS builder
+FROM rust:1.98.1-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS builder
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY rust-toolchain.toml ./
 COPY src ./src
 RUN cargo build --release --locked
 
-FROM debian:trixie-20260824-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS runtime
+FROM debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_HOST=0.0.0.0 \
     AUTOSUBS_PORT=3000 \
@@ -23,9 +23,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_DATA_DIR=/data \
     AUTOSUBS_FONTS_DIR=/fonts \
     AUTOSUBS_DIST_DIR=/app/frontend \
-    AUTOSUBS_ALLOWED_ROOTS=/data:/media
+    AUTOSUBS_ALLOWED_ROOTS=/data:/media \
+    HOME=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg fontconfig fonts-dejavu-core \
+ && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg fontconfig fonts-dejavu-core mesa-va-drivers intel-media-va-driver \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 1000 autosubs \
  && useradd --uid 1000 --gid 1000 --home-dir /nonexistent --shell /usr/sbin/nologin autosubs \

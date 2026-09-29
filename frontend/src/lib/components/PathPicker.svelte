@@ -38,7 +38,13 @@
   $: filtered = entries.filter((e) => e.name.toLowerCase().includes(filter.toLowerCase()));
   $: if (open && !lastOpen) { filter = ''; load(initialPath); }
   $: lastOpen = open;
-  onMount(() => { if (open) load(initialPath); });
+  onMount(() => {
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    const sync=()=>{if(!open)return;if(timer)clearTimeout(timer);timer=setTimeout(()=>load(currentPath||initialPath),180)};
+    window.addEventListener('autosubs:job-event',sync);
+    if (open) load(initialPath);
+    return()=>{window.removeEventListener('autosubs:job-event',sync);if(timer)clearTimeout(timer)};
+  });
 </script>
 
 {#if open}
