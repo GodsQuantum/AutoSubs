@@ -73,6 +73,27 @@ impl Default for FormatProfile {
     }
 }
 
+fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a.max(1)
+}
+
+fn source_sized_canvas(source_w: u32, source_h: u32, ratio_w: u32, ratio_h: u32) -> (u32, u32) {
+    let divisor = gcd_u32(ratio_w, ratio_h);
+    let ratio_w = ratio_w / divisor;
+    let ratio_h = ratio_h / divisor;
+    let even_step = if !ratio_w.is_multiple_of(2) || !ratio_h.is_multiple_of(2) {
+        2
+    } else {
+        1
+    };
+    let max_multiplier = (source_w / ratio_w).min(source_h / ratio_h);
+    let multiplier = (max_multiplier / even_step).max(1) * even_step;
+    (ratio_w * multiplier, ratio_h * multiplier)
+}
+
 impl FormatProfile {
     pub fn resolution(&self, source: Option<(u32, u32)>) -> Option<(u32, u32)> {
         match self.key {
@@ -81,7 +102,14 @@ impl FormatProfile {
                 (Some(w), Some(h)) if w > 0 && h > 0 => Some((w, h)),
                 _ => source,
             },
-            key => key.canonical_resolution(),
+            key => match (source, key.canonical_resolution()) {
+                (Some((source_w, source_h)), Some((ratio_w, ratio_h)))
+                    if source_w > 0 && source_h > 0 =>
+                {
+                    Some(source_sized_canvas(source_w, source_h, ratio_w, ratio_h))
+                }
+                _ => key.canonical_resolution(),
+            },
         }
     }
 

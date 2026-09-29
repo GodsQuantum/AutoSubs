@@ -16,6 +16,7 @@ pub struct EncoderCapabilities {
     pub h264_qsv: bool,
     pub h264_vaapi: bool,
     pub h264_amf: bool,
+    pub vaapi_device: Option<String>,
     pub libass: bool,
 }
 
@@ -126,6 +127,9 @@ fn geometry_chain(preset: &Preset, source: &MediaProbe) -> anyhow::Result<String
         return Ok(String::new());
     }
     let (w, h) = target_resolution(preset, source)?;
+    if (w, h) == (source.width, source.height) {
+        return Ok(String::new());
+    }
     Ok(match preset.format.fit {
         FitMode::Contain => format!(
             "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1"
@@ -171,12 +175,23 @@ pub fn build_render_plan(
         ),
         None => format!("ass='{}'", ffmpeg_filter_escape(ass)),
     };
-    let main_video = chain([geometry_chain(preset, source)?, ass_filter]);
-    let mut args = vec![
-        "-y".into(),
-        "-i".into(),
-        input.to_string_lossy().into_owned(),
-    ];
+    let hardware_upload = match encoder {
+        EncoderKind::VaapiH264 => Some("format=nv12,hwupload".to_owned()),
+        _ => None,
+    };
+    let main_video = chain([
+        geometry_chain(preset, source)?,
+        ass_filter,
+        hardware_upload.clone().unwrap_or_default(),
+    ]);
+    let mut args = vec!["-y".into()];
+    if encoder == EncoderKind::VaapiH264 {
+        let device = caps.vaapi_device.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("VA-API encoder selected but no usable render device was detected")
+        })?;
+        args.extend(["-vaapi_device".into(), device.into()]);
+    }
+    args.extend(["-i".into(), input.to_string_lossy().into_owned()]);
 
     match outro {
         None => {
@@ -191,12 +206,10 @@ pub fn build_render_plan(
             } else {
                 args.push("-an".into());
             }
-            args.extend([
-                "-movflags".into(),
-                "+faststart".into(),
-                "-pix_fmt".into(),
-                "yuv420p".into(),
-            ]);
+            args.extend(["-movflags".into(), "+faststart".into()]);
+            if encoder != EncoderKind::VaapiH264 {
+                args.extend(["-pix_fmt".into(), "yuv420p".into()]);
+            }
         }
         Some((outro_path, outro_probe)) => {
             args.extend(["-i".into(), outro_path.to_string_lossy().into_owned()]);
@@ -227,9 +240,26 @@ pub fn build_render_plan(
                     outro_probe.duration.max(0.01)
                 )
             };
-            let complex = format!(
-                "[0:v]{main_video}[mainv];[1:v]{outro_video}[outv];{main_audio};{outro_audio};[mainv][maina][outv][outa]concat=n=2:v=1:a=1[vout][aout]"
-            );
+            let complex = if encoder == EncoderKind::VaapiH264 {
+                let main_video_cpu = chain([
+                    geometry_chain(preset, source)?,
+                    match fonts_dir {
+                        Some(fonts) => format!(
+                            "ass='{}':fontsdir='{}'",
+                            ffmpeg_filter_escape(ass),
+                            ffmpeg_filter_escape(fonts)
+                        ),
+                        None => format!("ass='{}'", ffmpeg_filter_escape(ass)),
+                    },
+                ]);
+                format!(
+                    "[0:v]{main_video_cpu}[mainv];[1:v]{outro_video}[outv];{main_audio};{outro_audio};[mainv][maina][outv][outa]concat=n=2:v=1:a=1[vjoin][aout];[vjoin]format=nv12,hwupload[vout]"
+                )
+            } else {
+                format!(
+                    "[0:v]{main_video}[mainv];[1:v]{outro_video}[outv];{main_audio};{outro_audio};[mainv][maina][outv][outa]concat=n=2:v=1:a=1[vout][aout]"
+                )
+            };
             args.extend([
                 "-filter_complex".into(),
                 complex,
@@ -250,9 +280,10 @@ pub fn build_render_plan(
                 "192k".into(),
                 "-movflags".into(),
                 "+faststart".into(),
-                "-pix_fmt".into(),
-                "yuv420p".into(),
             ]);
+            if encoder != EncoderKind::VaapiH264 {
+                args.extend(["-pix_fmt".into(), "yuv420p".into()]);
+            }
         }
     }
     args.extend([
@@ -329,6 +360,92 @@ pub async fn render_video(
     Ok(())
 }
 
+fn encoder_is_listed(text: &str, name: &str) -> bool {
+    text.lines()
+        .any(|line| line.split_whitespace().any(|field| field == name))
+}
+
+async fn probe_command(command: Command, token: &CancellationToken) -> bool {
+    matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            crate::media::process::run_capture(command, token),
+        )
+        .await,
+        Ok(Ok(_))
+    )
+}
+
+async fn probe_software_input_encoder(name: &str, token: &CancellationToken) -> bool {
+    let mut command = Command::new("ffmpeg");
+    command.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=128x128:r=1",
+        "-frames:v",
+        "1",
+        "-an",
+        "-c:v",
+        name,
+        "-f",
+        "null",
+        "-",
+    ]);
+    probe_command(command, token).await
+}
+
+async fn probe_vaapi(token: &CancellationToken) -> Option<String> {
+    let Ok(entries) = std::fs::read_dir("/dev/dri") else {
+        return None;
+    };
+    let mut devices = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("renderD"))
+        })
+        .collect::<Vec<_>>();
+    devices.sort();
+
+    for device in devices {
+        let Some(device_text) = device.to_str() else {
+            continue;
+        };
+        let mut command = Command::new("ffmpeg");
+        command.args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-vaapi_device",
+            device_text,
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=128x128:r=1",
+            "-vf",
+            "format=nv12,hwupload",
+            "-frames:v",
+            "1",
+            "-an",
+            "-c:v",
+            "h264_vaapi",
+            "-f",
+            "null",
+            "-",
+        ]);
+        if probe_command(command, token).await {
+            return Some(device_text.to_owned());
+        }
+    }
+    None
+}
+
 pub async fn detect_encoder_capabilities(token: &CancellationToken) -> EncoderCapabilities {
     let mut enc = Command::new("ffmpeg");
     enc.args(["-hide_banner", "-encoders"]);
@@ -337,19 +454,36 @@ pub async fn detect_encoder_capabilities(token: &CancellationToken) -> EncoderCa
     let encoder_text = encoder_result
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
+
+    let h264_nvenc = encoder_is_listed(&encoder_text, "h264_nvenc")
+        && probe_software_input_encoder("h264_nvenc", token).await;
+    let hevc_nvenc = encoder_is_listed(&encoder_text, "hevc_nvenc")
+        && probe_software_input_encoder("hevc_nvenc", token).await;
+    let h264_qsv = encoder_is_listed(&encoder_text, "h264_qsv")
+        && probe_software_input_encoder("h264_qsv", token).await;
+    let h264_amf = encoder_is_listed(&encoder_text, "h264_amf")
+        && probe_software_input_encoder("h264_amf", token).await;
+    let vaapi_device = if encoder_is_listed(&encoder_text, "h264_vaapi") {
+        probe_vaapi(token).await
+    } else {
+        None
+    };
+
     let mut filters = Command::new("ffmpeg");
     filters.args(["-hide_banner", "-filters"]);
     let filter_text = crate::media::process::run_capture(filters, token)
         .await
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
+
     EncoderCapabilities {
         ffmpeg,
-        h264_nvenc: encoder_text.contains("h264_nvenc"),
-        hevc_nvenc: encoder_text.contains("hevc_nvenc"),
-        h264_qsv: encoder_text.contains("h264_qsv"),
-        h264_vaapi: encoder_text.contains("h264_vaapi"),
-        h264_amf: encoder_text.contains("h264_amf"),
+        h264_nvenc,
+        hevc_nvenc,
+        h264_qsv,
+        h264_vaapi: vaapi_device.is_some(),
+        h264_amf,
+        vaapi_device,
         libass: filter_text
             .lines()
             .any(|line| line.split_whitespace().nth(1) == Some("ass")),
@@ -421,8 +555,49 @@ mod tests {
         .unwrap();
         let joined = plan.args.join(" ");
         assert!(
-            joined.contains("scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920")
+            joined.contains("scale=594:1056:force_original_aspect_ratio=increase,crop=594:1056")
         );
+        assert_eq!(plan.target_resolution, (594, 1056));
+    }
+
+    #[test]
+    fn matching_portrait_ratio_keeps_4k_source_resolution() {
+        let mut src = source();
+        src.width = 2160;
+        src.height = 3840;
+        let preset = Preset {
+            format: FormatProfile {
+                key: FormatKey::Portrait916,
+                fit: FitMode::Cover,
+                width: None,
+                height: None,
+            },
+            ..Preset::default()
+        };
+        let plan = build_render_plan(
+            Path::new("in.mp4"),
+            Path::new("out.mp4"),
+            Path::new("sub.ass"),
+            &preset,
+            &Encoder::default(),
+            &EncoderCapabilities::default(),
+            &src,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(plan.target_resolution, (2160, 3840));
+        let joined = plan.args.join(" ");
+        assert!(!joined.contains("scale="));
+        assert!(!joined.contains("crop="));
+    }
+
+    #[test]
+    fn encoder_listing_matches_whole_fields_only() {
+        let listing = " V....D h264_nvenc NVIDIA NVENC H.264 encoder\n V..... h264_qsv H.264 QSV";
+        assert!(encoder_is_listed(listing, "h264_nvenc"));
+        assert!(encoder_is_listed(listing, "h264_qsv"));
+        assert!(!encoder_is_listed(listing, "nvenc"));
     }
 
     #[test]
@@ -450,6 +625,37 @@ mod tests {
         let joined = plan.args.join(" ");
         assert!(joined.contains("h264_nvenc -cq 19"));
         assert!(!joined.contains(" -crf "));
+    }
+
+    #[test]
+    fn vaapi_plan_uses_detected_device_and_hwupload() {
+        let settings = Encoder {
+            kind: EncoderKind::VaapiH264,
+            quality: 20,
+            preset: "medium".into(),
+        };
+        let caps = EncoderCapabilities {
+            h264_vaapi: true,
+            vaapi_device: Some("/dev/dri/renderD128".into()),
+            ..Default::default()
+        };
+        let plan = build_render_plan(
+            Path::new("in.mp4"),
+            Path::new("out.mp4"),
+            Path::new("sub.ass"),
+            &Preset::default(),
+            &settings,
+            &caps,
+            &source(),
+            None,
+            None,
+        )
+        .unwrap();
+        let joined = plan.args.join(" ");
+        assert!(joined.contains("-vaapi_device /dev/dri/renderD128"));
+        assert!(joined.contains("format=nv12,hwupload"));
+        assert!(joined.contains("-c:v h264_vaapi"));
+        assert!(!joined.contains("-pix_fmt yuv420p"));
     }
 
     #[test]

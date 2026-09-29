@@ -27,4 +27,4 @@ export interface SettingsView {
 export interface Asset { id:string; name:string; storedFile:string; mime:string; size:number; createdAtMs:number }
 export interface BrowseEntry { name:string; path:string; isDir:boolean; size?:number; modifiedMs?:number; selectable:boolean }
 export interface BrowseResponse { currentPath:string; parentPath?:string; entries:BrowseEntry[]; roots:string[] }
-export interface Capabilities { ffmpeg:boolean; h264Nvenc:boolean; hevcNvenc:boolean; h264Qsv:boolean; h264Vaapi:boolean; h264Amf:boolean; libass:boolean }
+export interface Capabilities { ffmpeg:boolean; h264Nvenc:boolean; hevcNvenc:boolean; h264Qsv:boolean; h264Vaapi:boolean; h264Amf:boolean; vaapiDevice?:string; libass:boolean }

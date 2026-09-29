@@ -294,7 +294,16 @@ async fn prepare_job(
 
 fn finish_error(state: &AppState, id: &str, token: &CancellationToken, error: anyhow::Error) {
     let cancelled = token.is_cancelled() || error.to_string() == "cancelled";
-    let message = error.to_string();
+    let mut message = format!("{error:#}");
+    if message.len() > 4_000 {
+        let tail_start = message
+            .char_indices()
+            .rev()
+            .nth(3_199)
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        message = format!("{} … {}", error, &message[tail_start..]);
+    }
     let _ = update_job(state, id, |job| {
         job.status = if cancelled {
             JobStatus::Cancelled

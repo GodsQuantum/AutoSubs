@@ -35,9 +35,10 @@
     selectedJobId=localStorage.getItem('autosubs:selectedJob')||'';loadAll();
     let timer:ReturnType<typeof setTimeout>|undefined;
     const es=new EventSource('/api/v1/events');
-    es.onmessage=()=>{if(timer)clearTimeout(timer);timer=setTimeout(refreshJobs,120)};
+    const onJobEvent=()=>{if(timer)clearTimeout(timer);timer=setTimeout(()=>{refreshJobs();window.dispatchEvent(new CustomEvent('autosubs:job-event'))},120)};
+    es.addEventListener('job',onJobEvent);
     es.onerror=()=>{};
-    return()=>{es.close();fontStylesheet.remove();if(timer)clearTimeout(timer)};
+    return()=>{es.removeEventListener('job',onJobEvent);es.close();fontStylesheet.remove();if(timer)clearTimeout(timer)};
   });
 </script>
 
