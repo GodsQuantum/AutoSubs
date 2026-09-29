@@ -177,11 +177,11 @@ If any preparation or render step fails, the original source stays where it was.
 
 The runtime image pins a dated Debian snapshot with FFmpeg 9.0.2, libass, Mesa VA-API/Vulkan 26.2.3 and Intel media VA-API 26.2.4. This keeps the multimedia stack reproducible while still providing current 2026 hardware-video fixes.
 
-At startup AutoSubs does not trust `ffmpeg -encoders`. Every H.264 hardware backend is tested with a representative 2160×3840 / 120-frame encode. Successful backends are timed and ranked; Settings shows the measured milliseconds and the backend that `Auto` will select. This catches drivers that initialize successfully on a tiny frame but fail under a real 4K workload.
+At startup AutoSubs does not trust `ffmpeg -encoders`. Every H.264 hardware backend is tested with a sustained 2160×3840 / 360-frame encode and a 20-second guard. Successful backends are timed and ranked; Settings shows the measured milliseconds and the backend that `Auto` will select. This catches drivers that initialize successfully on a tiny frame but fail under a real 4K workload.
 
 For Intel/AMD Linux acceleration, expose `/dev/dri` to the container and add the host video/render groups as required by your distro. The image includes Mesa VA-API and Vulkan drivers plus Intel's media VA-API driver. For NVIDIA, use the NVIDIA Container Toolkit and expose the GPU in your Compose stack. Hardware access is intentionally not enabled by default in the example Compose.
 
-`auto` uses the fastest validated H.264 hardware backend on that machine, including `h264_vulkan` when Vulkan benchmarks best. If a backend later fails on a real file, AutoSubs tries the next validated hardware backend before falling back to `libx264`. Explicit encoder selections remain explicit. For 4K software rendering, avoid hard 1 GiB container limits: HEVC decode + libass + libx264 can transiently exceed that.
+`auto` ranks validated H.264 hardware backends by measured runtime. Differences within 5% are treated as benchmark noise and resolved with a stability-first preference (NVENC, QSV, VA-API, Vulkan, AMF); outside that margin the genuinely faster backend wins. `h264_vulkan` is therefore selected when it survives the sustained 2160×3840 stress benchmark and is meaningfully faster on that machine. If a backend later fails on a real file, AutoSubs tries the next validated hardware backend before falling back to `libx264`. Explicit encoder selections remain explicit. For 4K software rendering, avoid hard 1 GiB container limits: HEVC decode + libass + libx264 can transiently exceed that.
 
 ## ⚙️ Configuration
 
