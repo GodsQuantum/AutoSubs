@@ -421,7 +421,7 @@ async fn probe_command(command: Command, token: &CancellationToken) -> bool {
 async fn timed_probe(command: Command, token: &CancellationToken) -> Option<u64> {
     let started = Instant::now();
     match tokio::time::timeout(
-        std::time::Duration::from_secs(8),
+        std::time::Duration::from_secs(20),
         crate::media::process::run_capture(command, token),
     )
     .await
@@ -468,7 +468,7 @@ async fn benchmark_software_encoder(
         "-i",
         "testsrc2=s=2160x3840:r=30",
         "-frames:v",
-        "180",
+        "360",
         "-an",
         "-c:v",
         name,
@@ -512,7 +512,7 @@ async fn benchmark_vaapi(token: &CancellationToken) -> Option<(String, u64)> {
             "-vf",
             "format=nv12,hwupload",
             "-frames:v",
-            "180",
+            "360",
             "-an",
             "-c:v",
             "h264_vaapi",
@@ -552,7 +552,7 @@ async fn benchmark_vulkan(token: &CancellationToken) -> Option<(String, u64)> {
             "-vf",
             "format=nv12,hwupload",
             "-frames:v",
-            "180",
+            "360",
             "-an",
             "-c:v",
             "h264_vulkan",
