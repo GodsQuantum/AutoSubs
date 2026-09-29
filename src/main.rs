@@ -32,6 +32,13 @@ async fn main() -> anyhow::Result<()> {
             "FFmpeg is available without the ass/libass filter; subtitle burn is disabled"
         );
     }
+    tracing::info!(
+        auto_encoder_order = ?caps.auto_encoder_order,
+        h264_benchmarks_ms = ?caps.h264_benchmarks_ms,
+        vaapi_device = ?caps.vaapi_device,
+        vulkan_device = ?caps.vulkan_device,
+        "runtime encoder benchmark complete"
+    );
     *state.encoders.write().await = caps;
 
     let shutdown = CancellationToken::new();

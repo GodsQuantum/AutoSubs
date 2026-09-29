@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from '$lib/api';
   import { dictionary } from '$lib/i18n';
-  import type { Capabilities, SettingsView } from '$lib/types';
+  import type { Capabilities, EncoderKind, SettingsView } from '$lib/types';
   export let settings:SettingsView|undefined; export let capabilities:Capabilities|undefined;
   export let refresh:()=>Promise<void>=async()=>{}; export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
   let draft:SettingsView|undefined; let loaded:SettingsView|undefined;
@@ -12,6 +12,14 @@
   async function save(){if(!draft)return;saving=true;try{await api.saveSettings({...draft,transcriptionApiKey:secret(transAction,transKey),localTranscriptionApiKey:secret(localAction,localKey),llmApiKey:secret(llmAction,llmKey)});await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}finally{saving=false}}
   async function models(kind:'primary'|'local'){if(!draft)return;try{const endpoint=kind==='primary'?draft.transcriptionUrl:draft.localTranscriptionUrl;const key=kind==='primary'?transKey:localKey;const result=await api.models(endpoint,key);if(kind==='primary')primaryModels=result.models;else localModels=result.models}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
   const yes=(v:boolean|undefined)=>v?$dictionary.available:$dictionary.unavailable;
+  const encoderName=(kind:EncoderKind|undefined)=>{
+    switch(kind){
+      case 'nvenc_h264':return $dictionary.nvencH264;case 'qsv_h264':return $dictionary.qsvH264;
+      case 'vaapi_h264':return $dictionary.vaapiH264;case 'vulkan_h264':return $dictionary.vulkanH264;
+      case 'amf_h264':return $dictionary.amfH264;case 'libx264':return 'libx264';default:return kind||'libx264';
+    }
+  };
+  const bench=(kind:string)=>capabilities?.h264BenchmarksMs?.[kind]!==undefined?' · '+capabilities.h264BenchmarksMs[kind]+' ms':'';
 </script>
 <div class="page">
   <div class="page-head"><div><h1 class="page-title">{$dictionary.settings}</h1><p class="page-kicker">{$dictionary.settingsInfo}</p></div><div class="page-actions"><button class="btn primary" disabled={!draft||saving} on:click={save}>{saving?$dictionary.saving:$dictionary.save}</button></div></div>
@@ -41,10 +49,10 @@
     </div></section>
 
     <section class="card"><div class="card-header"><strong>{$dictionary.encoding}</strong></div><div class="card-body stack">
-      <div class="field"><label for="settings-field-12">{$dictionary.encoder}</label><select id="settings-field-12" class="select" bind:value={draft.encoder.kind}><option value="auto">{$dictionary.auto}</option><option value="libx264">libx264</option><option value="libx265">libx265</option><option value="nvenc_h264" disabled={!capabilities?.h264Nvenc}>{$dictionary.nvencH264}</option><option value="nvenc_hevc" disabled={!capabilities?.hevcNvenc}>{$dictionary.nvencHevc}</option><option value="qsv_h264" disabled={!capabilities?.h264Qsv}>{$dictionary.qsvH264}</option><option value="vaapi_h264" disabled={!capabilities?.h264Vaapi}>{$dictionary.vaapiH264}</option><option value="amf_h264" disabled={!capabilities?.h264Amf}>{$dictionary.amfH264}</option></select></div>
+      <div class="field"><label for="settings-field-12">{$dictionary.encoder}</label><select id="settings-field-12" class="select" bind:value={draft.encoder.kind}><option value="auto">{$dictionary.auto}</option><option value="libx264">libx264</option><option value="libx265">libx265</option><option value="nvenc_h264" disabled={!capabilities?.h264Nvenc}>{$dictionary.nvencH264}</option><option value="nvenc_hevc" disabled={!capabilities?.hevcNvenc}>{$dictionary.nvencHevc}</option><option value="qsv_h264" disabled={!capabilities?.h264Qsv}>{$dictionary.qsvH264}</option><option value="vaapi_h264" disabled={!capabilities?.h264Vaapi}>{$dictionary.vaapiH264}</option><option value="vulkan_h264" disabled={!capabilities?.h264Vulkan}>{$dictionary.vulkanH264}</option><option value="amf_h264" disabled={!capabilities?.h264Amf}>{$dictionary.amfH264}</option></select></div>
       <div class="grid two"><div class="field"><label for="settings-field-13">{$dictionary.quality}</label><input id="settings-field-13" class="input" type="number" min="0" max="51" bind:value={draft.encoder.quality}/></div><div class="field"><label for="settings-field-14">{$dictionary.encoderPreset}</label><input id="settings-field-14" class="input" bind:value={draft.encoder.preset}/></div></div>
       <div class="divider"></div><strong class="small">{$dictionary.capabilities}</strong>
-      <div class="resource-meta"><span class="chip">FFmpeg: {yes(capabilities?.ffmpeg)}</span><span class="chip">libass: {yes(capabilities?.libass)}</span><span class="chip">NVENC runtime: {yes(capabilities?.h264Nvenc)}</span><span class="chip">QSV runtime: {yes(capabilities?.h264Qsv)}</span><span class="chip">VA-API runtime: {yes(capabilities?.h264Vaapi)}{capabilities?.vaapiDevice ? ` · ${capabilities.vaapiDevice.split('/').pop()}` : ''}</span><span class="chip">AMF runtime: {yes(capabilities?.h264Amf)}</span></div>
+      <div class="resource-meta"><span class="chip">Auto → {encoderName(capabilities?.autoEncoderOrder?.[0])}</span><span class="chip">FFmpeg: {yes(capabilities?.ffmpeg)}</span><span class="chip">libass: {yes(capabilities?.libass)}</span><span class="chip">NVENC: {yes(capabilities?.h264Nvenc)}{bench('nvenc_h264')}</span><span class="chip">QSV: {yes(capabilities?.h264Qsv)}{bench('qsv_h264')}</span><span class="chip">VA-API: {yes(capabilities?.h264Vaapi)}{bench('vaapi_h264')}{capabilities?.vaapiDevice ? ` · ${capabilities.vaapiDevice.split('/').pop()}` : ''}</span><span class="chip">Vulkan: {yes(capabilities?.h264Vulkan)}{bench('vulkan_h264')}</span><span class="chip">AMF: {yes(capabilities?.h264Amf)}{bench('amf_h264')}</span></div>
     </div></section>
   </div>
   <section class="card" style="margin-top:14px"><div class="card-body"><div class="help">{$dictionary.mobileTip}</div></div></section>

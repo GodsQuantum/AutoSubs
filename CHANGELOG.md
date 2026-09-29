@@ -6,14 +6,16 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ### Added
 
-- Runtime encoder probes verify that NVENC, QSV, VA-API and AMF can actually encode in the current host/container instead of trusting FFmpeg's compiled encoder list.
-- VA-API runtime probing records the usable `/dev/dri/renderD*` device and render plans upload filtered subtitle frames correctly before hardware encoding.
-- The runtime image ships Mesa VA-API drivers for AMD and Intel's media VA-API driver so exposed Linux GPUs can be used without ad-hoc package installation.
+- Runtime encoder benchmarks verify NVENC, QSV, VA-API, Vulkan and AMF with a 2160×3840 / 120-frame workload instead of trusting FFmpeg's compiled encoder list or a tiny one-frame probe.
+- Auto H.264 ranks validated hardware backends by measured runtime and uses the fastest one for the current machine; Settings exposes the benchmark scores and selected order.
+- VA-API probing records the best usable `/dev/dri/renderD*` device; Vulkan probing records the usable FFmpeg Vulkan device selector.
+- The runtime image ships a reproducible 2026-09-29 Debian snapshot with FFmpeg 9.0.2, Mesa VA-API/Vulkan 26.2.3 and Intel media VA-API 26.2.4.
 
 ### Changed
 
 - Standard social format choices are adaptive ratios rather than forced 1080p canvases: matching source ratios keep the original resolution, while ratio changes use the largest exact even canvas that fits within the source dimensions.
-- Hardware encoder choices that fail runtime probing are disabled in Settings; libx264 remains the universal fallback.
+- Hardware encoder choices that fail the representative runtime benchmark are disabled in Settings; Auto now tries validated hardware backends in measured order before the universal libx264 fallback.
+- Rust lockfile dependencies, Node 24 LTS, Svelte, Vite and the Svelte Vite plugin are updated to their current compatible September 2026 versions.
 
 ### Fixed
 
