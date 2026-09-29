@@ -60,7 +60,7 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 - **Persistent jobs** — SQLite keeps queue state, settings, workflows, assets and events across restarts. Active jobs become `interrupted` after an unexpected restart instead of pretending they completed.
 - **Real cancellation** — waiting jobs and running FFmpeg/network work use cancellation tokens; a cancelled job does not later consume a freed encode slot.
 - **Machine-readable render progress** — progress comes from FFmpeg's `-progress` protocol, not regexes against human stderr output.
-- **Runtime-tested hardware encoder discovery** — AutoSubs does not trust `ffmpeg -encoders` alone: it performs a real one-frame encode probe before marking NVENC, QSV, VA-API or AMF usable. VA-API also probes accessible `/dev/dri/renderD*` devices. `auto` therefore selects hardware that actually works in the current host/container, with one libx264 fallback if a later hardware render still fails.
+- **Runtime-benchmarked hardware encoder discovery** — AutoSubs does not trust `ffmpeg -encoders` or a trivial one-frame probe. NVENC, QSV, VA-API, Vulkan and AMF are stress-tested at 2160×3840 for 360 frames, timed, and ranked per machine; `auto` tries validated hardware in measured order, then falls back to libx264.
 - **Outro normalization** — main video and outro are normalized into one concat graph so different dimensions/FPS/audio layouts do not require a fragile stream-copy concat.
 - **EN / FR UI** — instant browser-local language switch. This is separate from the transcription language setting.
 
