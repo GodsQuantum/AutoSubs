@@ -534,6 +534,7 @@ pub enum EncoderKind {
     NvencHevc,
     QsvH264,
     VaapiH264,
+    VulkanH264,
     AmfH264,
 }
 

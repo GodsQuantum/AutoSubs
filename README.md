@@ -175,11 +175,13 @@ If any preparation or render step fails, the original source stays where it was.
 
 ## FFmpeg and hardware acceleration
 
-The runtime image includes FFmpeg with libass. On startup AutoSubs probes filters and performs a real one-frame encode test for each supported hardware path; a codec merely being compiled into FFmpeg is not treated as proof that its driver/device is usable. The Settings page reports runtime-tested capabilities for this particular container.
+The runtime image pins a dated Debian snapshot with FFmpeg 9.0.2, libass, Mesa VA-API/Vulkan 26.2.3 and Intel media VA-API 26.2.4. This keeps the multimedia stack reproducible while still providing current 2026 hardware-video fixes.
 
-For Intel/AMD Linux acceleration, expose `/dev/dri` to the container and add the host video/render groups as required by your distro. The published Debian image includes Mesa VA-API drivers for AMD and the Intel media VA-API driver, so a usable device can be runtime-probed without installing drivers inside the container. For NVIDIA, use the NVIDIA Container Toolkit and expose the GPU in your Compose stack. Hardware access is intentionally not enabled by default in the example Compose.
+At startup AutoSubs does not trust `ffmpeg -encoders`. Every H.264 hardware backend is tested with a representative 2160×3840 / 120-frame encode. Successful backends are timed and ranked; Settings shows the measured milliseconds and the backend that `Auto` will select. This catches drivers that initialize successfully on a tiny frame but fail under a real 4K workload.
 
-`auto` is conservative: only runtime-tested hardware is eligible. If a selected hardware encoder later fails during a real render, that render is retried once with `libx264`. It does not silently loop through six encoders. For 4K software rendering, avoid hard 1 GiB container limits: HEVC decode + libass + libx264 can transiently exceed that.
+For Intel/AMD Linux acceleration, expose `/dev/dri` to the container and add the host video/render groups as required by your distro. The image includes Mesa VA-API and Vulkan drivers plus Intel's media VA-API driver. For NVIDIA, use the NVIDIA Container Toolkit and expose the GPU in your Compose stack. Hardware access is intentionally not enabled by default in the example Compose.
+
+`auto` uses the fastest validated H.264 hardware backend on that machine, including `h264_vulkan` when Vulkan benchmarks best. If a backend later fails on a real file, AutoSubs tries the next validated hardware backend before falling back to `libx264`. Explicit encoder selections remain explicit. For 4K software rendering, avoid hard 1 GiB container limits: HEVC decode + libass + libx264 can transiently exceed that.
 
 ## ⚙️ Configuration
 

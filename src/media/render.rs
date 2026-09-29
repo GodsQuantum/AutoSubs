@@ -1,7 +1,7 @@
 use crate::domain::{Encoder, EncoderKind, FitMode, FormatKey, Preset};
 use crate::media::probe::MediaProbe;
 use crate::media::process::ProcessError;
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path, time::Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -15,8 +15,12 @@ pub struct EncoderCapabilities {
     pub hevc_nvenc: bool,
     pub h264_qsv: bool,
     pub h264_vaapi: bool,
+    pub h264_vulkan: bool,
     pub h264_amf: bool,
     pub vaapi_device: Option<String>,
+    pub vulkan_device: Option<String>,
+    pub h264_benchmarks_ms: BTreeMap<String, u64>,
+    pub auto_encoder_order: Vec<EncoderKind>,
     pub libass: bool,
 }
 
@@ -34,13 +38,28 @@ fn ffmpeg_filter_escape(path: &Path) -> String {
         .replace('\'', "'\\''")
 }
 
+pub fn auto_encoder_order(caps: &EncoderCapabilities) -> Vec<EncoderKind> {
+    if !caps.auto_encoder_order.is_empty() {
+        return caps.auto_encoder_order.clone();
+    }
+    [
+        (caps.h264_nvenc, EncoderKind::NvencH264),
+        (caps.h264_qsv, EncoderKind::QsvH264),
+        (caps.h264_vaapi, EncoderKind::VaapiH264),
+        (caps.h264_vulkan, EncoderKind::VulkanH264),
+        (caps.h264_amf, EncoderKind::AmfH264),
+    ]
+    .into_iter()
+    .filter_map(|(available, encoder)| available.then_some(encoder))
+    .collect()
+}
+
 fn resolved_encoder(settings: &Encoder, caps: &EncoderCapabilities) -> EncoderKind {
     match settings.kind {
-        EncoderKind::Auto if caps.h264_nvenc => EncoderKind::NvencH264,
-        EncoderKind::Auto if caps.h264_qsv => EncoderKind::QsvH264,
-        EncoderKind::Auto if caps.h264_vaapi => EncoderKind::VaapiH264,
-        EncoderKind::Auto if caps.h264_amf => EncoderKind::AmfH264,
-        EncoderKind::Auto => EncoderKind::Libx264,
+        EncoderKind::Auto => auto_encoder_order(caps)
+            .into_iter()
+            .next()
+            .unwrap_or(EncoderKind::Libx264),
         ref explicit => explicit.clone(),
     }
 }
@@ -87,6 +106,14 @@ fn encoder_args(encoder: &EncoderKind, quality: u8, preset: &str) -> Vec<String>
             quality,
         ],
         EncoderKind::VaapiH264 => vec!["-c:v".into(), "h264_vaapi".into(), "-qp".into(), quality],
+        EncoderKind::VulkanH264 => vec![
+            "-c:v".into(),
+            "h264_vulkan".into(),
+            "-qp".into(),
+            quality,
+            "-usage".into(),
+            "transcode".into(),
+        ],
         EncoderKind::AmfH264 => vec![
             "-c:v".into(),
             "h264_amf".into(),
@@ -97,6 +124,10 @@ fn encoder_args(encoder: &EncoderKind, quality: u8, preset: &str) -> Vec<String>
         ],
         EncoderKind::Auto => unreachable!("encoder must be resolved first"),
     }
+}
+
+fn uses_hardware_upload(encoder: &EncoderKind) -> bool {
+    matches!(encoder, EncoderKind::VaapiH264 | EncoderKind::VulkanH264)
 }
 
 fn nvenc_preset(value: &str) -> &'static str {
@@ -175,21 +206,32 @@ pub fn build_render_plan(
         ),
         None => format!("ass='{}'", ffmpeg_filter_escape(ass)),
     };
-    let hardware_upload = match encoder {
-        EncoderKind::VaapiH264 => Some("format=nv12,hwupload".to_owned()),
-        _ => None,
-    };
+    let hardware_upload = uses_hardware_upload(&encoder).then(|| "format=nv12,hwupload".to_owned());
     let main_video = chain([
         geometry_chain(preset, source)?,
         ass_filter,
         hardware_upload.clone().unwrap_or_default(),
     ]);
     let mut args = vec!["-y".into()];
-    if encoder == EncoderKind::VaapiH264 {
-        let device = caps.vaapi_device.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("VA-API encoder selected but no usable render device was detected")
-        })?;
-        args.extend(["-vaapi_device".into(), device.into()]);
+    match &encoder {
+        EncoderKind::VaapiH264 => {
+            let device = caps.vaapi_device.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("VA-API encoder selected but no usable render device was detected")
+            })?;
+            args.extend(["-vaapi_device".into(), device.into()]);
+        }
+        EncoderKind::VulkanH264 => {
+            let device = caps.vulkan_device.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("Vulkan encoder selected but no usable Vulkan device was detected")
+            })?;
+            args.extend([
+                "-init_hw_device".into(),
+                format!("vulkan=vk:{device}"),
+                "-filter_hw_device".into(),
+                "vk".into(),
+            ]);
+        }
+        _ => {}
     }
     args.extend(["-i".into(), input.to_string_lossy().into_owned()]);
 
@@ -207,7 +249,7 @@ pub fn build_render_plan(
                 args.push("-an".into());
             }
             args.extend(["-movflags".into(), "+faststart".into()]);
-            if encoder != EncoderKind::VaapiH264 {
+            if !uses_hardware_upload(&encoder) {
                 args.extend(["-pix_fmt".into(), "yuv420p".into()]);
             }
         }
@@ -240,7 +282,7 @@ pub fn build_render_plan(
                     outro_probe.duration.max(0.01)
                 )
             };
-            let complex = if encoder == EncoderKind::VaapiH264 {
+            let complex = if uses_hardware_upload(&encoder) {
                 let main_video_cpu = chain([
                     geometry_chain(preset, source)?,
                     match fonts_dir {
@@ -281,7 +323,7 @@ pub fn build_render_plan(
                 "-movflags".into(),
                 "+faststart".into(),
             ]);
-            if encoder != EncoderKind::VaapiH264 {
+            if !uses_hardware_upload(&encoder) {
                 args.extend(["-pix_fmt".into(), "yuv420p".into()]);
             }
         }
@@ -376,7 +418,20 @@ async fn probe_command(command: Command, token: &CancellationToken) -> bool {
     )
 }
 
-async fn probe_software_input_encoder(name: &str, token: &CancellationToken) -> bool {
+async fn timed_probe(command: Command, token: &CancellationToken) -> Option<u64> {
+    let started = Instant::now();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        crate::media::process::run_capture(command, token),
+    )
+    .await
+    {
+        Ok(Ok(_)) => Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64),
+        _ => None,
+    }
+}
+
+async fn probe_quick_encoder(name: &str, token: &CancellationToken) -> bool {
     let mut command = Command::new("ffmpeg");
     command.args([
         "-hide_banner",
@@ -398,7 +453,32 @@ async fn probe_software_input_encoder(name: &str, token: &CancellationToken) -> 
     probe_command(command, token).await
 }
 
-async fn probe_vaapi(token: &CancellationToken) -> Option<String> {
+async fn benchmark_software_encoder(
+    name: &str,
+    quality_args: &[&str],
+    token: &CancellationToken,
+) -> Option<u64> {
+    let mut command = Command::new("ffmpeg");
+    command.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=2160x3840:r=30",
+        "-frames:v",
+        "120",
+        "-an",
+        "-c:v",
+        name,
+    ]);
+    command.args(quality_args);
+    command.args(["-f", "null", "-"]);
+    timed_probe(command, token).await
+}
+
+async fn benchmark_vaapi(token: &CancellationToken) -> Option<(String, u64)> {
     let Ok(entries) = std::fs::read_dir("/dev/dri") else {
         return None;
     };
@@ -413,6 +493,7 @@ async fn probe_vaapi(token: &CancellationToken) -> Option<String> {
         .collect::<Vec<_>>();
     devices.sort();
 
+    let mut best: Option<(String, u64)> = None;
     for device in devices {
         let Some(device_text) = device.to_str() else {
             continue;
@@ -427,23 +508,69 @@ async fn probe_vaapi(token: &CancellationToken) -> Option<String> {
             "-f",
             "lavfi",
             "-i",
-            "color=c=black:s=128x128:r=1",
+            "color=c=black:s=2160x3840:r=30",
             "-vf",
             "format=nv12,hwupload",
             "-frames:v",
-            "1",
+            "120",
             "-an",
             "-c:v",
             "h264_vaapi",
+            "-qp",
+            "23",
             "-f",
             "null",
             "-",
         ]);
-        if probe_command(command, token).await {
-            return Some(device_text.to_owned());
+        if let Some(ms) = timed_probe(command, token).await
+            && best.as_ref().is_none_or(|(_, current)| ms < *current)
+        {
+            best = Some((device_text.to_owned(), ms));
         }
     }
-    None
+    best
+}
+
+async fn benchmark_vulkan(token: &CancellationToken) -> Option<(String, u64)> {
+    let mut best: Option<(String, u64)> = None;
+    for index in 0..4 {
+        let selector = index.to_string();
+        let init = format!("vulkan=vk:{selector}");
+        let mut command = Command::new("ffmpeg");
+        command.args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-init_hw_device",
+            &init,
+            "-filter_hw_device",
+            "vk",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=2160x3840:r=30",
+            "-vf",
+            "format=nv12,hwupload",
+            "-frames:v",
+            "120",
+            "-an",
+            "-c:v",
+            "h264_vulkan",
+            "-qp",
+            "23",
+            "-usage",
+            "transcode",
+            "-f",
+            "null",
+            "-",
+        ]);
+        if let Some(ms) = timed_probe(command, token).await
+            && best.as_ref().is_none_or(|(_, current)| ms < *current)
+        {
+            best = Some((selector, ms));
+        }
+    }
+    best
 }
 
 pub async fn detect_encoder_capabilities(token: &CancellationToken) -> EncoderCapabilities {
@@ -455,19 +582,58 @@ pub async fn detect_encoder_capabilities(token: &CancellationToken) -> EncoderCa
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
 
-    let h264_nvenc = encoder_is_listed(&encoder_text, "h264_nvenc")
-        && probe_software_input_encoder("h264_nvenc", token).await;
-    let hevc_nvenc = encoder_is_listed(&encoder_text, "hevc_nvenc")
-        && probe_software_input_encoder("hevc_nvenc", token).await;
-    let h264_qsv = encoder_is_listed(&encoder_text, "h264_qsv")
-        && probe_software_input_encoder("h264_qsv", token).await;
-    let h264_amf = encoder_is_listed(&encoder_text, "h264_amf")
-        && probe_software_input_encoder("h264_amf", token).await;
-    let vaapi_device = if encoder_is_listed(&encoder_text, "h264_vaapi") {
-        probe_vaapi(token).await
+    let nvenc_ms = if encoder_is_listed(&encoder_text, "h264_nvenc") {
+        benchmark_software_encoder("h264_nvenc", &["-cq", "23"], token).await
     } else {
         None
     };
+    let qsv_ms = if encoder_is_listed(&encoder_text, "h264_qsv") {
+        benchmark_software_encoder("h264_qsv", &["-global_quality", "23"], token).await
+    } else {
+        None
+    };
+    let amf_ms = if encoder_is_listed(&encoder_text, "h264_amf") {
+        benchmark_software_encoder("h264_amf", &["-qp_i", "23", "-qp_p", "23"], token).await
+    } else {
+        None
+    };
+    let vaapi = if encoder_is_listed(&encoder_text, "h264_vaapi") {
+        benchmark_vaapi(token).await
+    } else {
+        None
+    };
+    let vulkan = if encoder_is_listed(&encoder_text, "h264_vulkan") {
+        benchmark_vulkan(token).await
+    } else {
+        None
+    };
+    let hevc_nvenc = encoder_is_listed(&encoder_text, "hevc_nvenc")
+        && probe_quick_encoder("hevc_nvenc", token).await;
+
+    let mut ranked = Vec::new();
+    let mut h264_benchmarks_ms = BTreeMap::new();
+    for (name, encoder, score) in [
+        ("nvenc_h264", EncoderKind::NvencH264, nvenc_ms),
+        ("qsv_h264", EncoderKind::QsvH264, qsv_ms),
+        (
+            "vaapi_h264",
+            EncoderKind::VaapiH264,
+            vaapi.as_ref().map(|(_, ms)| *ms),
+        ),
+        (
+            "vulkan_h264",
+            EncoderKind::VulkanH264,
+            vulkan.as_ref().map(|(_, ms)| *ms),
+        ),
+        ("amf_h264", EncoderKind::AmfH264, amf_ms),
+    ] {
+        if let Some(ms) = score {
+            h264_benchmarks_ms.insert(name.to_owned(), ms);
+            ranked.push((ms, encoder));
+        }
+    }
+    ranked.sort_by_key(|(ms, _)| *ms);
+    let auto_encoder_order = ranked.into_iter().map(|(_, encoder)| encoder).collect();
 
     let mut filters = Command::new("ffmpeg");
     filters.args(["-hide_banner", "-filters"]);
@@ -478,12 +644,16 @@ pub async fn detect_encoder_capabilities(token: &CancellationToken) -> EncoderCa
 
     EncoderCapabilities {
         ffmpeg,
-        h264_nvenc,
+        h264_nvenc: nvenc_ms.is_some(),
         hevc_nvenc,
-        h264_qsv,
-        h264_vaapi: vaapi_device.is_some(),
-        h264_amf,
-        vaapi_device,
+        h264_qsv: qsv_ms.is_some(),
+        h264_vaapi: vaapi.is_some(),
+        h264_vulkan: vulkan.is_some(),
+        h264_amf: amf_ms.is_some(),
+        vaapi_device: vaapi.map(|(device, _)| device),
+        vulkan_device: vulkan.map(|(device, _)| device),
+        h264_benchmarks_ms,
+        auto_encoder_order,
         libass: filter_text
             .lines()
             .any(|line| line.split_whitespace().nth(1) == Some("ass")),
@@ -656,6 +826,66 @@ mod tests {
         assert!(joined.contains("format=nv12,hwupload"));
         assert!(joined.contains("-c:v h264_vaapi"));
         assert!(!joined.contains("-pix_fmt yuv420p"));
+    }
+
+    #[test]
+    fn vulkan_plan_uses_detected_device_and_hwupload() {
+        let settings = Encoder {
+            kind: EncoderKind::VulkanH264,
+            quality: 18,
+            preset: "medium".into(),
+        };
+        let caps = EncoderCapabilities {
+            h264_vulkan: true,
+            vulkan_device: Some("0".into()),
+            ..Default::default()
+        };
+        let plan = build_render_plan(
+            Path::new("in.mp4"),
+            Path::new("out.mp4"),
+            Path::new("sub.ass"),
+            &Preset::default(),
+            &settings,
+            &caps,
+            &source(),
+            None,
+            None,
+        )
+        .unwrap();
+        let joined = plan.args.join(" ");
+        assert!(joined.contains("-init_hw_device vulkan=vk:0 -filter_hw_device vk"));
+        assert!(joined.contains("format=nv12,hwupload"));
+        assert!(joined.contains("-c:v h264_vulkan -qp 18 -usage transcode"));
+        assert!(!joined.contains("-pix_fmt yuv420p"));
+    }
+
+    #[test]
+    fn auto_uses_runtime_benchmark_order() {
+        let caps = EncoderCapabilities {
+            h264_vaapi: true,
+            h264_vulkan: true,
+            vaapi_device: Some("/dev/dri/renderD128".into()),
+            vulkan_device: Some("0".into()),
+            auto_encoder_order: vec![EncoderKind::VulkanH264, EncoderKind::VaapiH264],
+            ..Default::default()
+        };
+        let plan = build_render_plan(
+            Path::new("in.mp4"),
+            Path::new("out.mp4"),
+            Path::new("sub.ass"),
+            &Preset::default(),
+            &Encoder::default(),
+            &caps,
+            &source(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(plan.encoder, EncoderKind::VulkanH264);
+        assert_eq!(
+            auto_encoder_order(&caps),
+            vec![EncoderKind::VulkanH264, EncoderKind::VaapiH264]
+        );
     }
 
     #[test]
