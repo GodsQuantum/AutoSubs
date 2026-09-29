@@ -34,7 +34,9 @@ RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
       ffmpeg=7:9.0.2-1 \
       mesa-va-drivers=26.2.3-2 \
       mesa-vulkan-drivers=26.2.3-2 \
-      intel-media-va-driver=26.2.4+dfsg1-1 \
+ && if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+      apt-get install -y --no-install-recommends intel-media-va-driver=26.2.4+dfsg1-1; \
+    fi \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 1000 autosubs \
  && useradd --uid 1000 --gid 1000 --home-dir /nonexistent --shell /usr/sbin/nologin autosubs \
