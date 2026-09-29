@@ -9,7 +9,7 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 - Runtime encoder benchmarks verify NVENC, QSV, VA-API, Vulkan and AMF with a 2160×3840 / 360-frame stress workload and a 20-second guard instead of trusting FFmpeg's compiled encoder list or a tiny one-frame probe.
 - Auto H.264 ranks validated hardware backends by measured runtime; differences within 5% are treated as benchmark noise and use a stability-first tie-break, while materially faster backends (including Vulkan) win. Settings exposes the benchmark scores and selected order.
 - VA-API probing records the best usable `/dev/dri/renderD*` device; Vulkan probing records the usable FFmpeg Vulkan device selector.
-- The runtime image ships a reproducible 2026-09-29 Debian snapshot with FFmpeg 9.0.2, Mesa VA-API/Vulkan 26.2.3 and Intel media VA-API 26.2.4.
+- The runtime image ships a reproducible 2026-09-29 Debian snapshot with FFmpeg 9.0.2 and Mesa VA-API/Vulkan 26.2.3 on all architectures; Intel media VA-API 26.2.4 is installed only on amd64 so multi-arch publication remains valid.
 
 ### Changed
 
