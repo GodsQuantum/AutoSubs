@@ -125,15 +125,15 @@
     <div class="modal" role="dialog" aria-modal="true" aria-label={title || $dictionary.filePicker} aria-busy={loading} bind:this={modalElement} tabindex="-1">
       <div class="modal-head">
         <strong>{title || $dictionary.filePicker}</strong>
-        <button class="btn icon ghost" on:click={close} aria-label={$dictionary.close}>������</button>
+        <button class="btn icon ghost" on:click={close} aria-label={$dictionary.close}>&times;</button>
       </div>
       <div class="picker-path mono" title={currentPath}>{currentPath || $dictionary.loading}</div>
       <div class="picker-list">
         <div class="picker-toolbar">
-          {#if parentPath}<button class="btn" on:click={()=>load(parentPath)}>��������� {$dictionary.back}</button>{/if}
+          {#if parentPath}<button class="btn" on:click={()=>load(parentPath)}>&larr; {$dictionary.back}</button>{/if}
           <input class="input" bind:this={filterInput} bind:value={filter} placeholder={$dictionary.filter} aria-label={$dictionary.filter} />
-          <button class="btn icon" on:click={()=>load(currentPath)} aria-label={$dictionary.refresh}>���������</button>
-          <button class="btn icon" class:favorite-active={favoriteCurrent} on:click={toggleFavorite} aria-label={favoriteCurrent?$dictionary.removeFavorite:$dictionary.addFavorite} title={favoriteCurrent?$dictionary.removeFavorite:$dictionary.addFavorite}>{favoriteCurrent?'���������':'���������'}</button>
+          <button class="btn icon" on:click={()=>load(currentPath)} aria-label={$dictionary.refresh}>&#8635;</button>
+          <button class="btn icon" class:favorite-active={favoriteCurrent} on:click={toggleFavorite} aria-label={favoriteCurrent?$dictionary.removeFavorite:$dictionary.addFavorite} title={favoriteCurrent?$dictionary.removeFavorite:$dictionary.addFavorite}>{favoriteCurrent?'\u2605':'\u2606'}</button>
         </div>
         {#if roots.length > 1 || favorites.length}
           <div class="picker-shortcuts">
@@ -148,7 +148,7 @@
             {#if favorites.length}
               <div class="picker-favorites">
                 <span class="field-label">{$dictionary.favorites}</span>
-                <div class="row wrap">{#each favorites as favorite}<button class="btn ghost favorite-chip" class:active={favorite===currentPath} on:click={()=>load(favorite)} title={favorite}>��������� {pathLabel(favorite)}</button>{/each}</div>
+                <div class="row wrap">{#each favorites as favorite}<button class="btn ghost favorite-chip" class:active={favorite===currentPath} on:click={()=>load(favorite)} title={favorite}>&#9733; {pathLabel(favorite)}</button>{/each}</div>
               </div>
             {/if}
           </div>
@@ -159,7 +159,7 @@
         {:else}
           {#each filtered as entry}
             <button class="picker-row" on:dblclick={()=>activate(entry)} on:click={()=> entry.isDir ? load(entry.path) : entry.selectable && activate(entry)}>
-              <span>{entry.isDir ? '���������' : '���������'}</span>
+              <span>{entry.isDir ? '\u25b0' : '\u25a4'}</span>
               <span><strong>{entry.name}</strong><span class="meta mono">{entry.path}</span></span>
               {#if !entry.isDir && entry.size !== undefined}<span class="meta">{Math.max(1,Math.round(entry.size/1024/1024))} MB</span>{/if}
             </button>
