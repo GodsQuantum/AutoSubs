@@ -4,6 +4,14 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-02
+
+### Added
+
+- Server-side folder favorites persist in SQLite and appear as compact shortcuts in every server picker.
+- Workflows can explicitly publish either **Video only** or **Video + SRT**; existing workflows migrate to Video + SRT.
+- Workflow archival moves the source plus same-stem companion files as one rollback-safe bundle after successful publication.
+
 ### Added
 
 - Runtime encoder benchmarks verify NVENC, QSV, VA-API, Vulkan and AMF with a 2160×3840 / 360-frame stress workload and a 20-second guard instead of trusting FFmpeg's compiled encoder list or a tiny one-frame probe.
@@ -19,6 +27,8 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ### Fixed
 
+- French hyphen continuations such as `quand` + `-même` and `rendez-` + `vous` are reconstructed without stray spaces while speaker dashes remain separate.
+- French segmentation never orphans hard-bound elisions or hyphenated compounds, while grammatical no-break preferences can relax only when line-width constraints require it.
 - Live job/file UI synchronization now listens to the backend's named `job` SSE events correctly and refreshes an open server file picker as job state changes.
 - Job errors retain the underlying error chain instead of collapsing to a generic top-level message such as `render video`.
 

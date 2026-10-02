@@ -395,6 +395,14 @@ impl Brand {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkflowOutput {
+    VideoOnly,
+    #[default]
+    VideoSrt,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Workflow {
@@ -405,6 +413,8 @@ pub struct Workflow {
     pub output_dir: String,
     #[serde(default, alias = "archivesDir")]
     pub archive_dir: String,
+    #[serde(default)]
+    pub output_mode: WorkflowOutput,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brand_id: Option<String>,
     #[serde(default, rename = "brand", skip_serializing_if = "Option::is_none")]
@@ -704,5 +714,19 @@ mod tests {
         let profile = FormatProfile::default();
         assert_eq!(profile.key, FormatKey::Source);
         assert_eq!(profile.fit, FitMode::Preserve);
+    }
+
+    #[test]
+    fn legacy_workflow_defaults_to_video_and_srt_output() {
+        let workflow: Workflow = serde_json::from_value(serde_json::json!({
+            "name": "Legacy",
+            "watchDir": "/watch",
+            "outputDir": "/output",
+            "archiveDir": "/archive",
+            "format": {"key":"source","fit":"preserve"},
+            "enabled": true
+        }))
+        .unwrap();
+        assert_eq!(workflow.output_mode, WorkflowOutput::VideoSrt);
     }
 }

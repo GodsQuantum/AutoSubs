@@ -113,6 +113,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/models", post(settings::list_models))
         .route("/api/v1/browse", get(browse::browse))
         .route(
+            "/api/v1/browse/favorites",
+            get(browse::favorites).put(browse::set_favorite),
+        )
+        .route(
             "/api/v1/assets",
             get(assets::list_assets)
                 .post(assets::upload_asset)

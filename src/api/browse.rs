@@ -9,6 +9,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+const FAVORITES_KEY: &str = "browse_favorites";
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowseQuery {
@@ -39,6 +41,77 @@ pub struct BrowseResponse {
     parent_path: Option<String>,
     entries: Vec<Entry>,
     roots: Vec<String>,
+    favorites: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteRequest {
+    path: String,
+    favorite: bool,
+}
+
+fn canonical_favorite(config: &crate::config::Config, path: &str) -> anyhow::Result<String> {
+    config
+        .resolve_allowed_dir(Path::new(path))?
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("favorite path is not valid UTF-8"))
+}
+
+fn valid_favorites(state: &AppState) -> AppResult<Vec<String>> {
+    let stored = state
+        .db
+        .get_singleton::<Vec<String>>(FAVORITES_KEY)
+        .map_err(AppError::Internal)?
+        .unwrap_or_default();
+    let mut valid = Vec::new();
+    for path in &stored {
+        if let Ok(canonical) = canonical_favorite(&state.config, path)
+            && !valid.contains(&canonical)
+        {
+            valid.push(canonical);
+        }
+    }
+    if valid != stored {
+        state
+            .db
+            .set_singleton(FAVORITES_KEY, &valid)
+            .map_err(AppError::Internal)?;
+    }
+    Ok(valid)
+}
+
+pub async fn favorites(State(state): State<AppState>) -> AppResult<Json<Vec<String>>> {
+    Ok(Json(valid_favorites(&state)?))
+}
+
+pub async fn set_favorite(
+    State(state): State<AppState>,
+    Json(request): Json<FavoriteRequest>,
+) -> AppResult<Json<Vec<String>>> {
+    let mut favorites = valid_favorites(&state)?;
+    if request.favorite {
+        let canonical = canonical_favorite(&state.config, &request.path).map_err(|_| {
+            AppError::BadRequest(
+                "favorite must be an existing directory inside AUTOSUBS_ALLOWED_ROOTS".into(),
+            )
+        })?;
+        if !favorites.contains(&canonical) {
+            favorites.push(canonical);
+        }
+    } else {
+        let canonical =
+            canonical_favorite(&state.config, &request.path).unwrap_or(request.path.clone());
+        favorites.retain(|path| path != &canonical && path != &request.path);
+    }
+    favorites.sort();
+    favorites.dedup();
+    state
+        .db
+        .set_singleton(FAVORITES_KEY, &favorites)
+        .map_err(AppError::Internal)?;
+    Ok(Json(favorites))
 }
 
 pub async fn browse(
@@ -56,6 +129,7 @@ pub async fn browse(
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
+    let favorites = valid_favorites(&state)?;
     let current = if query.path.trim().is_empty() {
         state
             .config
@@ -133,6 +207,7 @@ pub async fn browse(
         parent_path,
         entries,
         roots,
+        favorites,
     }))
 }
 
@@ -152,5 +227,36 @@ mod tests {
         let root = Path::new("/mnt/media");
         assert!(bounded_parent(root, root).is_none());
         assert_eq!(bounded_parent(Path::new("/mnt/media/a"), root), Some(root));
+    }
+
+    #[test]
+    fn favorite_folder_must_be_an_existing_allowed_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let allowed = temp.path().join("allowed");
+        let favorite = allowed.join("nested");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&favorite).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let mut config = crate::config::Config {
+            host: "127.0.0.1".into(),
+            port: 3000,
+            config_dir: temp.path().join("config"),
+            data_dir: temp.path().join("data"),
+            fonts_dir: temp.path().join("fonts"),
+            dist_dir: temp.path().join("dist"),
+            allowed_roots: vec![allowed],
+            max_render_jobs: 1,
+            max_transcription_jobs: 1,
+            max_queued_jobs: 1,
+            workflow_scan_seconds: 5,
+            file_stability_ms: 10,
+            max_upload_bytes: 1024,
+        };
+        config.init_dirs().unwrap();
+        assert_eq!(
+            canonical_favorite(&config, favorite.to_str().unwrap()).unwrap(),
+            std::fs::canonicalize(favorite).unwrap().to_string_lossy()
+        );
+        assert!(canonical_favorite(&config, outside.to_str().unwrap()).is_err());
     }
 }

@@ -76,12 +76,33 @@ fn cleaned_word(word: &str) -> String {
         .to_lowercase()
 }
 
+fn hyphen_continuation(left: &str, right: &str) -> bool {
+    let left = left.trim_end();
+    let right = right.trim_start();
+    let right_starts_hyphen = right.strip_prefix('-').is_some_and(|rest| {
+        !rest.is_empty() && rest.chars().next().is_some_and(char::is_alphanumeric)
+    });
+    let left_ends_hyphen = left.strip_suffix('-').is_some_and(|rest| {
+        !rest.is_empty() && rest.chars().last().is_some_and(char::is_alphanumeric)
+    });
+    (right_starts_hyphen && left.chars().last().is_some_and(char::is_alphanumeric))
+        || (left_ends_hyphen && right.chars().next().is_some_and(char::is_alphanumeric))
+}
+
+fn pair_is_unbreakable(left: &str, right: &str) -> bool {
+    let left = left.trim_end();
+    let right = right.trim_start();
+    right.starts_with([',', '.', ';', ':', '!', '?', '…', ')', ']', '}', '»', '”'])
+        || left.ends_with(['(', '[', '{', '«', '“'])
+        || left.ends_with(['\'', '’'])
+        || right.starts_with(['\'', '’'])
+        || hyphen_continuation(left, right)
+}
+
 fn pair_is_bound(left: &str, right: &str) -> bool {
     let left_trimmed = left.trim_end();
     let right_trimmed = right.trim_start();
-    if right_trimmed.starts_with([',', '.', ';', ':', '!', '?', '…', ')', ']', '}', '»', '”'])
-        || left_trimmed.ends_with(['(', '[', '{', '«', '“'])
-    {
+    if pair_is_unbreakable(left_trimmed, right_trimmed) {
         return true;
     }
     let l = cleaned_word(left);
@@ -90,9 +111,6 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
         return false;
     }
 
-    if left_trimmed.ends_with(['\'', '’']) || right_trimmed.starts_with(['\'', '’']) {
-        return true;
-    }
     if protected_token_re().is_match(left.trim()) || protected_token_re().is_match(right.trim()) {
         return left.contains("http") || right.contains("http");
     }
@@ -106,7 +124,9 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
         "bien", "si", "qui", "que", "qu", "quoi", "dont", "où", "quand", "comment", "pourquoi",
         "et", "ou", "mais", "donc", "or", "ni", "car", "parce", "tandis", "jusqu", "jusque",
         "afin", "tel", "telle", "tels", "telles", "quel", "quelle", "quels", "quelles", "avant",
-        "alors", "ainsi",
+        "alors", "ainsi", "a", "ai", "as", "avons", "avez", "ont", "suis", "es", "est", "sommes",
+        "êtes", "sont", "étais", "était", "étions", "étiez", "étaient", "été", "être", "sera",
+        "seras", "serons", "serez", "seront",
     ];
     const BACKWARD: &[&str] = &["pas", "plus", "jamais", "rien", "personne"];
     if FORWARD.contains(&l.as_str()) || BACKWARD.contains(&r.as_str()) {
@@ -225,7 +245,10 @@ fn fix_tokenization(words: Vec<SubtitleWord>) -> Vec<SubtitleWord> {
         if let Some(last) = fixed.last_mut() {
             let left = last.word.trim_end();
             let right = word.word.trim_start();
-            if left.ends_with(['\'', '’']) || right.starts_with(['\'', '’']) {
+            if left.ends_with(['\'', '’'])
+                || right.starts_with(['\'', '’'])
+                || hyphen_continuation(left, right)
+            {
                 last.word = format!("{}{}", left, right);
                 last.end = word.end;
                 continue;
@@ -348,7 +371,8 @@ fn segment_text_len(words: &[SubtitleWord]) -> usize {
 }
 
 fn needs_space(left: &str, right: &str) -> bool {
-    !left.trim_end().ends_with(['\'', '’', '(', '[', '{', '“'])
+    !hyphen_continuation(left, right)
+        && !left.trim_end().ends_with(['\'', '’', '(', '[', '{', '“'])
         && !right
             .trim_start()
             .starts_with(['\'', '’', ',', '.', '…', ')', ']', '}', '»', '”'])
@@ -469,6 +493,15 @@ fn best_event_boundary(
                     && can_layout(&words[..index], max_chars, max_lines)
             })
         })
+        .or_else(|| {
+            // Under hard width pressure, relax grammatical preferences but never
+            // split an elision, hyphenated compound, or punctuation attachment.
+            (1..words.len()).rev().find(|&index| {
+                !pair_is_unbreakable(&words[index - 1].word, &words[index].word)
+                    && unicode_allows_boundary(&words[index - 1].word, &words[index].word)
+                    && can_layout(&words[..index], max_chars, max_lines)
+            })
+        })
 }
 
 fn make_block(words: &[SubtitleWord], id: u32, max_chars: usize, max_lines: usize) -> SubtitleLine {
@@ -542,13 +575,10 @@ pub fn group_transcription_into_lines_with_layout(
 
         current.push(word);
         while !can_layout(&current, max_chars, max_lines) && current.len() > 1 {
-            let boundary = best_event_boundary(&current, max_chars, max_lines)
-                .or_else(|| {
-                    (1..current.len())
-                        .rev()
-                        .find(|&index| can_layout(&current[..index], max_chars, max_lines))
-                })
-                .unwrap_or(1);
+            let Some(boundary) = best_event_boundary(&current, max_chars, max_lines) else {
+                // An inseparable French unit is preferable to an orphaned function word.
+                break;
+            };
             let remainder = current.split_off(boundary);
             blocks.push(make_block(&current, id, max_chars, max_lines));
             id += 1;
@@ -907,5 +937,54 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn french_hyphen_continuations_merge_without_spaces() {
+        let input = transcription(&[
+            ("quand", 0.0, 0.2),
+            ("-même", 0.2, 0.4),
+            ("rendez-", 0.5, 0.7),
+            ("vous", 0.7, 1.0),
+        ]);
+        let lines = group_transcription_into_lines(&input, 42, 2);
+        let words = lines
+            .into_iter()
+            .flat_map(|line| line.words.unwrap_or_default())
+            .map(|word| word.word)
+            .collect::<Vec<_>>();
+        assert_eq!(words, vec!["quand-même", "rendez-vous"]);
+    }
+
+    #[test]
+    fn speaker_dash_is_not_merged_into_the_following_word() {
+        let input = transcription(&[
+            ("-", 0.0, 0.05),
+            ("Bonjour", 0.05, 0.4),
+            ("monsieur", 0.4, 0.8),
+        ]);
+        let lines = group_transcription_into_lines(&input, 42, 2);
+        assert!(lines.iter().any(|line| line.text.contains("- Bonjour")));
+    }
+
+    #[test]
+    fn impossible_width_never_orphans_french_elision() {
+        let input = transcription(&[
+            ("voilà", 0.0, 0.2),
+            ("l'", 0.2, 0.3),
+            ("extraordinaire", 0.3, 0.8),
+        ]);
+        let lines = group_transcription_into_lines(&input, 5, 1);
+        assert!(
+            lines.iter().all(|line| line.text.trim() != "l'"),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn french_auxiliary_stays_with_its_participle() {
+        assert!(pair_is_bound("est", "parti"));
+        assert!(pair_is_bound("a", "compris"));
+        assert!(pair_is_bound("ont", "vu"));
     }
 }
