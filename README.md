@@ -41,7 +41,7 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 
 - **Video ingest without a tiny extension allow-list** — AutoSubs asks `ffprobe` whether a stable file actually contains video.
 - **Resumable browser uploads** — tus 1.0-style `HEAD`/`PATCH` uploads resume after network loss; re-selecting the same file after a reload resumes from the server offset.
-- **Server-side picker** — use files already mounted into the container instead of uploading them again.
+- **Server-side picker + favorites** — use files already mounted into the container instead of uploading them again; favorite frequently used folders once and reopen them from a compact shortcut list.
 - **Sidecar-first workflow** — import `.ass`, `.ssa`, `.srt` or AutoSubs JSON; attach, replace or detach a sidecar before rendering.
 - **Transcription providers** — OpenAI-compatible transcription endpoints plus an optional local provider/fallback such as Speaches.
 - **Optional LLM correction** — spelling/punctuation correction after import/transcription while preserving line count and timings.
@@ -54,8 +54,8 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 - **Source geometry invariant** — Source + Preserve keeps the primary video dimensions and aspect ratio without scale, pad, crop, or black bars.
 - **Adaptive format profiles** — Source, 9:16, 16:9, 1:1, 4:5 and custom canvases. Matching source ratios keep their original pixel resolution; ratio changes use the largest exact, even canvas that fits inside the source dimensions, avoiding gratuitous upscale/downscale. `contain`, `cover` and `stretch` remain explicit choices.
 - **Brands** — group logo/outro assets and choose a default preset per output format.
-- **Workflows** — independent watch/output/archive folders, Brand/preset resolution, native filesystem events plus periodic reconciliation for NFS-mounted folders.
-- **No archive-on-failure** — a source is archived only after the final video and subtitle sidecars have been published successfully.
+- **Workflows** — independent watch/output/archive folders, Brand/preset resolution, native filesystem events plus periodic reconciliation for NFS-mounted folders, with an explicit **Video only** or **Video + SRT** output policy.
+- **Bundle archive after success** — the source and same-stem companion files move together only after the selected outputs are published successfully; prefix collisions such as `clip2.mp4` are not captured by a `clip.mp4` job.
 - **Transactional output publication** — existing outputs are kept recoverable until the new video + SRT + ASS + JSON set is committed.
 - **Persistent jobs** — SQLite keeps queue state, settings, workflows, assets and events across restarts. Active jobs become `interrupted` after an unexpected restart instead of pretending they completed.
 - **Real cancellation** — waiting jobs and running FFmpeg/network work use cancellation tokens; a cancelled job does not later consume a freed encode slot.
@@ -258,6 +258,7 @@ GET/POST     /api/v1/workflows
 DELETE       /api/v1/workflows/{id}
 GET/PUT      /api/v1/settings
 GET          /api/v1/browse
+GET/PUT      /api/v1/browse/favorites
 GET/POST     /api/v1/assets
 DELETE       /api/v1/assets/{id}
 ```

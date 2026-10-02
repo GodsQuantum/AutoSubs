@@ -41,7 +41,7 @@ Le navigateur n'est pas le moteur métier. Rust possède la normalisation des ti
 
 - **Ingest vidéo sans mini-liste d'extensions** — `ffprobe` décide si un fichier stable contient réellement une piste vidéo.
 - **Uploads reprenables** — protocole de type tus 1.0 avec `HEAD`/`PATCH`; après coupure ou reload, resélectionner le même fichier reprend à l'offset du serveur.
-- **Picker serveur** — les vidéos déjà montées dans le conteneur ne sont pas recopiées inutilement.
+- **Picker serveur + favoris** — les vidéos déjà montées dans le conteneur ne sont pas recopiées inutilement ; un dossier peut être ajouté aux favoris persistants pour le retrouver immédiatement.
 - **Sidecars** — import `.ass`, `.ssa`, `.srt` ou JSON AutoSubs; ajout, remplacement ou suppression avant rendu.
 - **Transcription** — endpoint externe compatible OpenAI + fournisseur local/fallback type Speaches.
 - **Correction LLM optionnelle** — orthographe et ponctuation sans laisser le modèle modifier directement les timings.
@@ -54,8 +54,8 @@ Le navigateur n'est pas le moteur métier. Rust possède la normalisation des ti
 - **Invariant Source** — Source + Conserver préserve la géométrie primaire sans scale, pad, crop ni bandes noires.
 - **Formats réels** — Source, 9:16, 16:9, 1:1, 4:5 et custom. La géométrie source est préservée par défaut ; `contain`, `cover` et `stretch` sont explicites.
 - **Brands / Marques** — logo, outro et preset par défaut selon le format.
-- **Workflows** — dossiers watch/output/archive indépendants, résolution Brand/preset, événements natifs + réconciliation périodique pour les montages NFS.
-- **Jamais d'archive après échec** — la source n'est déplacée qu'une fois vidéo + sidecars publiés avec succès.
+- **Workflows** — dossiers watch/output/archive indépendants, résolution Brand/preset, événements natifs + réconciliation périodique pour les montages NFS, avec sortie explicite **Vidéo uniquement** ou **Vidéo + SRT**.
+- **Archive groupée après succès** — la source et les fichiers compagnons du même nom de base sont déplacés ensemble uniquement après publication réussie ; `clip2.mp4` n'est pas capturé par le job `clip.mp4`.
 - **Publication transactionnelle** — les anciennes sorties restent récupérables jusqu'au commit du nouveau jeu vidéo + SRT + ASS + JSON.
 - **Jobs persistants** — SQLite garde file, réglages, workflows, assets et événements. Après crash/reboot, un job actif devient `interrupted`.
 - **Annulation réelle** — l'attente d'un slot, les requêtes réseau et FFmpeg respectent le token d'annulation.
