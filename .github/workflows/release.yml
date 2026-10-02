@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       replace_unreleased_tag:
-        description: Replace an existing tag only when no GitHub Release exists
+        description: Fast-forward an existing tag only when no GitHub Release exists
         required: true
         default: false
         type: boolean
@@ -161,8 +161,10 @@ jobs:
               echo "::error::Tag $RELEASE_TAG points to $TAG_SHA instead of $GITHUB_SHA. Re-run with replace_unreleased_tag=true only if the existing tag is unreleased."
               exit 1
             fi
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG"
-            TAG_SHA=""
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" \
+              -f sha="$GITHUB_SHA" \
+              -F force=false >/dev/null
+            TAG_SHA="$GITHUB_SHA"
           fi
 
           if [[ -z "$TAG_SHA" ]]; then
