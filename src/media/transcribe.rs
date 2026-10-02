@@ -229,7 +229,7 @@ mod endpoint_regression_tests {
     async fn base_v1_endpoint_transcribes_via_audio_transcriptions() {
         let app = Router::new().route(
             "/v1/audio/transcriptions",
-            post(|| async { Json(json!({"text": "ok"})) }),
+            post(|_body: axum::body::Bytes| async { Json(json!({"text": "ok"})) }),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
