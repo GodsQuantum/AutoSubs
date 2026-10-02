@@ -21,6 +21,10 @@ updates:
       frontend-updates:
         applies-to: version-updates
         patterns: ["*"]
+    ignore:
+      - dependency-name: "typescript"
+        # svelte-check 4.7.x requires TS 5/6; TS 7 is already provided separately via @typescript/native for --tsgo.
+        versions: ["7.x"]
 
   - package-ecosystem: docker
     directory: /
@@ -43,3 +47,4 @@ updates:
       actions-updates:
         applies-to: version-updates
         patterns: ["*"]
+
