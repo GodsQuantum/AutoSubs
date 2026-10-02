@@ -4,6 +4,17 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to publish (vX.Y.Z)
+        required: true
+        type: string
+      replace_unreleased_tag:
+        description: Fast-forward an existing tag only when no GitHub Release exists
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -12,8 +23,11 @@ permissions:
   attestations: write
   artifact-metadata: write
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -35,8 +49,8 @@ jobs:
       - name: Verify release tag matches package versions
         shell: bash
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          EXPECTED="${GITHUB_REF_NAME#v}"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          EXPECTED="${RELEASE_TAG#v}"
           CARGO_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')"
           FRONTEND_VERSION="$(python3 -c 'import json; print(json.load(open("frontend/package.json"))["version"])')"
           echo "tag=$EXPECTED"
@@ -85,7 +99,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.version=${{ env.RELEASE_TAG }}
           provenance: false
           sbom: false
           cache-from: type=gha,scope=release-${{ matrix.arch }}
@@ -112,14 +126,14 @@ jobs:
         run: |
           docker buildx imagetools create \
             --metadata-file /tmp/metadata.json \
-            -t ghcr.io/godsquantum/autosubs:${GITHUB_REF_NAME} \
+            -t ghcr.io/godsquantum/autosubs:${RELEASE_TAG} \
             -t ghcr.io/godsquantum/autosubs:latest \
             ghcr.io/godsquantum/autosubs:${GITHUB_SHA}-amd64 \
             ghcr.io/godsquantum/autosubs:${GITHUB_SHA}-arm64
           DIGEST="$(jq -r '.["containerimage.descriptor"].digest' /tmp/metadata.json)"
           test "${DIGEST#sha256:}" != "$DIGEST"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
-          docker buildx imagetools inspect ghcr.io/godsquantum/autosubs:${GITHUB_REF_NAME}
+          docker buildx imagetools inspect ghcr.io/godsquantum/autosubs:${RELEASE_TAG}
 
       - name: Attest published image
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -128,13 +142,47 @@ jobs:
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
 
+      - name: Ensure release tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $RELEASE_TAG already exists; refusing to move its tag."
+            exit 1
+          fi
+
+          TAG_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null || true)"
+          if [[ -n "$TAG_SHA" && "$TAG_SHA" != "$GITHUB_SHA" ]]; then
+            if [[ "${{ inputs.replace_unreleased_tag }}" != "true" ]]; then
+              echo "::error::Tag $RELEASE_TAG points to $TAG_SHA instead of $GITHUB_SHA. Re-run with replace_unreleased_tag=true only if the existing tag is unreleased."
+              exit 1
+            fi
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" \
+              -f sha="$GITHUB_SHA" \
+              -F force=false >/dev/null
+            TAG_SHA="$GITHUB_SHA"
+          fi
+
+          if [[ -z "$TAG_SHA" ]]; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$RELEASE_TAG" \
+              -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+          VERIFIED_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')"
+          test "$VERIFIED_SHA" = "$GITHUB_SHA"
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "AutoSubs $GITHUB_REF_NAME" \
+            --title "AutoSubs $RELEASE_TAG" \
             --generate-notes \
             --latest

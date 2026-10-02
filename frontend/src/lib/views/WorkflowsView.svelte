@@ -8,7 +8,7 @@
   let selected='';let draft:Workflow=makeWorkflow();let picker:''|'watch'|'output'|'archive'='';
   $: current=workflows.find(w=>w.id===selected);$: if(current&&draft.id!==current.id)draft=clone(current);
   const clone=(w:Workflow):Workflow=>JSON.parse(JSON.stringify(w));
-  function makeWorkflow():Workflow{return{id:'',name:'',watchDir:'',outputDir:'',archiveDir:'',format:{key:'source',fit:'preserve'},enabled:false}}
+  function makeWorkflow():Workflow{return{id:'',name:'',watchDir:'',outputDir:'',archiveDir:'',outputMode:'video-srt',format:{key:'source',fit:'preserve'},enabled:false}}
   function create(){selected='';draft=makeWorkflow()}
   function applyPresetDefaults(){const p=presets.find(p=>p.id===draft.presetId);if(!p)return;draft={...draft,format:{...p.format}}}
   async function save(){try{const w=await api.saveWorkflow(draft);selected=w.id;draft=clone(w);await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
@@ -24,9 +24,10 @@
         <div class="row between"><div class="field" style="flex:1"><label for="workflows-field-1">{$dictionary.workflowName}</label><input id="workflows-field-1" class="input" bind:value={draft.name}/></div><label class="check" style="padding-top:20px"><input type="checkbox" bind:checked={draft.enabled}/>{draft.enabled?$dictionary.enabled:$dictionary.disabled}</label></div>
         <div class="field"><label for="workflows-field-2">{$dictionary.watchDir}</label><div class="row"><input id="workflows-field-2" class="input mono" bind:value={draft.watchDir}/><button class="btn" on:click={()=>picker='watch'}>{$dictionary.browse}</button></div></div>
         <div class="field"><label for="workflows-field-3">{$dictionary.outputDir}</label><div class="row"><input id="workflows-field-3" class="input mono" bind:value={draft.outputDir}/><button class="btn" on:click={()=>picker='output'}>{$dictionary.browse}</button></div></div>
-        <div class="field"><label for="workflows-field-4">{$dictionary.archiveDir}</label><div class="row"><input id="workflows-field-4" class="input mono" bind:value={draft.archiveDir}/><button class="btn" on:click={()=>picker='archive'}>{$dictionary.browse}</button></div></div>
+        <div class="field"><label for="workflows-field-4">{$dictionary.archiveDir}</label><div class="row"><input id="workflows-field-4" class="input mono" bind:value={draft.archiveDir}/><button class="btn" on:click={()=>picker='archive'}>{$dictionary.browse}</button></div><div class="help">{$dictionary.workflowArchiveHint}</div></div>
       </div></section>
       <section class="card"><div class="card-header"><strong>{$dictionary.outputSection}</strong></div><div class="card-body grid two">
+        <div class="field"><label for="workflows-field-output">{$dictionary.workflowOutput}</label><select id="workflows-field-output" class="select" bind:value={draft.outputMode}><option value="video-only">{$dictionary.videoOnlyOutput}</option><option value="video-srt">{$dictionary.videoSrtOutput}</option></select></div>
         <div class="field"><label for="workflows-field-5">{$dictionary.brand}</label><select id="workflows-field-5" class="select" bind:value={draft.brandId}><option value="">{$dictionary.noBrand}</option>{#each brands as b}<option value={b.id}>{b.name}</option>{/each}</select></div>
         <div class="field"><label for="workflows-field-6">{$dictionary.presetOverride}</label><select id="workflows-field-6" class="select" bind:value={draft.presetId} on:change={applyPresetDefaults}><option value="">{$dictionary.brandDefault}</option>{#each presets as p}<option value={p.id}>{p.name}</option>{/each}</select></div>
         <div class="field"><label for="workflows-field-7">{$dictionary.format}</label><select id="workflows-field-7" class="select" bind:value={draft.format.key}><option value="source">{$dictionary.sourceFormat}</option><option value="portrait916">9:16</option><option value="landscape169">16:9</option><option value="square11">1:1</option><option value="portrait45">4:5</option><option value="custom">{$dictionary.custom}</option></select></div>

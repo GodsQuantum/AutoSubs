@@ -1,6 +1,6 @@
 use crate::domain::{
     Asset, Brand, EncoderKind, Job, JobOutro, JobStatus, Preset, RawWord, SubtitleLine,
-    TimingQuality, TranscriptTimeline, TranscriptionResponse, Workflow,
+    TimingQuality, TranscriptTimeline, TranscriptionResponse, Workflow, WorkflowOutput,
 };
 use crate::media::process::ProcessError;
 use crate::media::transcribe::{TranscriptionError, extract_audio, transcribe_audio};
@@ -24,6 +24,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SidecarKind {
+    Srt,
+    Ass,
+    Json,
+}
+
+fn workflow_sidecars(output: Option<WorkflowOutput>) -> &'static [SidecarKind] {
+    match output {
+        None => &[SidecarKind::Srt, SidecarKind::Ass, SidecarKind::Json],
+        Some(WorkflowOutput::VideoOnly) => &[],
+        Some(WorkflowOutput::VideoSrt) => &[SidecarKind::Srt],
+    }
+}
 
 pub fn now_ms() -> u128 {
     SystemTime::now()
@@ -364,6 +379,20 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
     } else {
         None
     };
+    let sidecar_kinds = workflow_sidecars(workflow.as_ref().map(|w| w.output_mode));
+    let mut archive_candidates = if job.archive_after_success && workflow.is_some() {
+        collect_source_bundle(&input)
+            .await
+            .context("collect source bundle before render")?
+    } else {
+        Vec::new()
+    };
+    if let Some(sidecar) = job.attached_sidecar.as_ref()
+        && sidecar.exists()
+        && !archive_candidates.contains(sidecar)
+    {
+        archive_candidates.push(sidecar.clone());
+    }
     let mut preset = resolve_preset(
         state,
         &job.original_name,
@@ -484,29 +513,29 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
         .file_stem()
         .and_then(|v| v.to_str())
         .unwrap_or("video");
-    let side_srt = final_video.with_file_name(format!("{stem}.srt"));
-    let side_ass = final_video.with_file_name(format!("{stem}.ass"));
-    let side_json = final_video.with_file_name(format!("{stem}.json"));
-    let staged_srt = temp_peer(&side_srt);
-    let staged_ass = temp_peer(&side_ass);
-    let staged_json = temp_peer(&side_json);
-    cleanup.track(staged_srt.clone());
-    cleanup.track(staged_ass.clone());
-    cleanup.track(staged_json.clone());
-    tokio::fs::write(&staged_srt, generate_srt_content(&lines)).await?;
-    tokio::fs::write(
-        &staged_ass,
-        generate_ass_content(&lines, &preset, Some((source.width, source.height))),
-    )
-    .await?;
-    tokio::fs::write(&staged_json, serde_json::to_vec_pretty(&lines)?).await?;
-    publish_transaction(&[
-        (staging_video.clone(), final_video.clone()),
-        (staged_srt, side_srt),
-        (staged_ass, side_ass),
-        (staged_json, side_json),
-    ])
-    .await?;
+    let mut publish_pairs = vec![(staging_video.clone(), final_video.clone())];
+    for kind in sidecar_kinds {
+        let final_sidecar = match kind {
+            SidecarKind::Srt => final_video.with_file_name(format!("{stem}.srt")),
+            SidecarKind::Ass => final_video.with_file_name(format!("{stem}.ass")),
+            SidecarKind::Json => final_video.with_file_name(format!("{stem}.json")),
+        };
+        let staged = temp_peer(&final_sidecar);
+        cleanup.track(staged.clone());
+        match kind {
+            SidecarKind::Srt => {
+                tokio::fs::write(&staged, generate_srt_content(&lines)).await?;
+            }
+            SidecarKind::Ass => {
+                tokio::fs::write(&staged, ass.as_bytes()).await?;
+            }
+            SidecarKind::Json => {
+                tokio::fs::write(&staged, serde_json::to_vec_pretty(&lines)?).await?;
+            }
+        }
+        publish_pairs.push((staged, final_sidecar));
+    }
+    publish_transaction(&publish_pairs).await?;
 
     let mut effective_input = input.clone();
     if job.archive_after_success
@@ -516,30 +545,9 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
             .config
             .resolve_allowed_dir(Path::new(&workflow.archive_dir))
             .context("validate workflow archive directory")?;
-        let source_name = input
-            .file_name()
-            .ok_or_else(|| anyhow!("source has no filename"))?;
-        let archive_reservation = reserve_archive_path(&archive_dir, source_name).await?;
-        let archived = archive_reservation.path.clone();
-        move_file(&input, &archived)
+        effective_input = archive_source_bundle(&archive_dir, &input, &archive_candidates)
             .await
-            .context("archive source after successful render")?;
-        effective_input = archived;
-        if let Some(sidecar) = &job.attached_sidecar
-            && sidecar.exists()
-            && let Some(name) = sidecar.file_name()
-        {
-            match reserve_archive_path(&archive_dir, name).await {
-                Ok(sidecar_reservation) => {
-                    if let Err(error) = move_file(sidecar, &sidecar_reservation.path).await {
-                        tracing::warn!(%error, "could not archive subtitle sidecar");
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "could not reserve archive name for subtitle sidecar")
-                }
-            }
-        }
+            .context("archive source bundle after successful render")?;
     }
     update_job(state, id, move |job| {
         job.status = JobStatus::Done;
@@ -955,6 +963,105 @@ fn temp_peer(final_path: &Path) -> PathBuf {
     final_path.with_file_name(format!(".autosubs.partial-{}", Uuid::new_v4()))
 }
 
+fn bundle_name_matches(stem: &str, name: &str) -> bool {
+    let Some(rest) = name.strip_prefix(stem) else {
+        return false;
+    };
+    rest.is_empty()
+        || rest
+            .chars()
+            .next()
+            .is_some_and(|c| matches!(c, '.' | '_' | '-' | ' ' | '(' | '['))
+}
+
+fn internal_source_bundle_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains(".partial-")
+        || lower.ends_with(".uploading")
+        || lower.ends_with("_words.json")
+        || lower.starts_with(".autosubs-reserve-")
+}
+
+async fn collect_source_bundle(input: &Path) -> Result<Vec<PathBuf>> {
+    let parent = input
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or_else(|| anyhow!("source has no parent directory"))?;
+    let stem = input
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| anyhow!("source stem is not valid UTF-8"))?;
+    let mut dir = tokio::fs::read_dir(parent).await?;
+    let mut paths = Vec::new();
+    while let Some(entry) = dir.next_entry().await? {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !bundle_name_matches(stem, name) || internal_source_bundle_name(name) {
+            continue;
+        }
+        if entry.file_type().await?.is_file() {
+            paths.push(entry.path());
+        }
+    }
+    if input.exists() && !paths.iter().any(|path| path == input) {
+        paths.push(input.to_path_buf());
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+async fn rollback_archived_files(moved: &[(PathBuf, PathBuf)]) {
+    for (source, archived) in moved.iter().rev() {
+        if let Err(error) = move_file(archived, source).await {
+            tracing::error!(
+                source = %source.display(),
+                archived = %archived.display(),
+                %error,
+                "could not roll back archived source companion"
+            );
+        }
+    }
+}
+
+async fn archive_source_bundle(
+    archive_dir: &Path,
+    input: &Path,
+    candidates: &[PathBuf],
+) -> Result<PathBuf> {
+    let mut ordered = candidates.to_vec();
+    ordered.sort();
+    ordered.dedup();
+    ordered.sort_by_key(|path| path == input);
+
+    let mut moved = Vec::new();
+    let mut archived_input = None;
+    for source in ordered {
+        if !source.exists() {
+            if source == input {
+                rollback_archived_files(&moved).await;
+                bail!("source disappeared before archive: {}", source.display());
+            }
+            continue;
+        }
+        let name = source
+            .file_name()
+            .ok_or_else(|| anyhow!("archive candidate has no filename"))?;
+        let reservation = reserve_archive_path(archive_dir, name).await?;
+        let destination = reservation.path.clone();
+        if let Err(error) = move_file(&source, &destination).await {
+            rollback_archived_files(&moved).await;
+            return Err(error).with_context(|| format!("archive {}", source.display()));
+        }
+        if source == input {
+            archived_input = Some(destination.clone());
+        }
+        moved.push((source, destination));
+    }
+    archived_input.ok_or_else(|| anyhow!("source was not present in archive bundle"))
+}
+
 async fn restore_backups(backups: &[(PathBuf, PathBuf)]) {
     for (backup, original) in backups.iter().rev() {
         if let Err(error) = tokio::fs::rename(backup, original).await {
@@ -1264,5 +1371,65 @@ mod tests {
         assert_ne!(ext, "ass");
         assert_ne!(ext, "ssa");
         assert_ne!(ext, "json");
+    }
+
+    #[test]
+    fn workflow_output_policy_is_explicit_and_manual_keeps_full_exports() {
+        assert_eq!(
+            workflow_sidecars(None),
+            &[SidecarKind::Srt, SidecarKind::Ass, SidecarKind::Json]
+        );
+        assert_eq!(workflow_sidecars(Some(WorkflowOutput::VideoOnly)), &[]);
+        assert_eq!(
+            workflow_sidecars(Some(WorkflowOutput::VideoSrt)),
+            &[SidecarKind::Srt]
+        );
+    }
+
+    #[test]
+    fn source_bundle_matching_uses_stem_boundaries_not_raw_prefixes() {
+        for name in [
+            "clip.mp4",
+            "clip.srt",
+            "clip.ass",
+            "clip - cover.jpg",
+            "clip_notes.txt",
+            "clip(backup).mov",
+        ] {
+            assert!(bundle_name_matches("clip", name), "{name}");
+        }
+        for name in ["clip2.mp4", "clipping.mov", "clipper.srt"] {
+            assert!(!bundle_name_matches("clip", name), "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn source_bundle_archive_moves_related_files_and_keeps_prefix_collisions() {
+        let root = tempfile::tempdir().unwrap();
+        let source_dir = root.path().join("watch");
+        let archive_dir = root.path().join("archive");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        for name in [
+            "clip.mp4",
+            "clip.srt",
+            "clip - cover.jpg",
+            "clip_notes.txt",
+            "clip2.mp4",
+        ] {
+            std::fs::write(source_dir.join(name), name.as_bytes()).unwrap();
+        }
+        let input = source_dir.join("clip.mp4");
+        let candidates = collect_source_bundle(&input).await.unwrap();
+        assert_eq!(candidates.len(), 4);
+        let archived = archive_source_bundle(&archive_dir, &input, &candidates)
+            .await
+            .unwrap();
+        assert_eq!(archived, archive_dir.join("clip.mp4"));
+        for name in ["clip.mp4", "clip.srt", "clip - cover.jpg", "clip_notes.txt"] {
+            assert!(archive_dir.join(name).is_file(), "{name}");
+            assert!(!source_dir.join(name).exists(), "{name}");
+        }
+        assert!(source_dir.join("clip2.mp4").is_file());
     }
 }
