@@ -20,7 +20,6 @@
   let loading = false;
   let error = '';
   let filter = '';
-  let lastOpen = false;
   let filterInput: HTMLInputElement | undefined;
   let returnFocus: HTMLElement | null = null;
   const requestGate = createLatestRequestGate();
@@ -68,22 +67,24 @@
       favorites = await api.favoriteFolder(currentPath, !favorites.includes(currentPath));
     } catch (e) { error = e instanceof Error ? e.message : String(e); }
   }
+  function syncOpenState(isOpen: boolean) {
+    if (isOpen) {
+      returnFocus = typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      filter = '';
+      load(initialPath);
+      tick().then(() => filterInput?.focus());
+    } else {
+      requestGate.invalidate();
+    }
+  }
   $: currentRoot = rootForPath(currentPath, roots);
   $: favoriteCurrent = favorites.includes(currentPath);
   $: filtered = entries.filter((e) => e.name.toLowerCase().includes(filter.toLowerCase()));
-  $: if (open && !lastOpen) {
-    returnFocus = typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    filter = '';
-    load(initialPath);
-    tick().then(() => filterInput?.focus());
-  }
-  $: if (!open && lastOpen) requestGate.invalidate();
-  $: lastOpen = open;
+  $: syncOpenState(open);
   onMount(() => {
     let timer:ReturnType<typeof setTimeout>|undefined;
     const sync=()=>{if(!open)return;if(timer)clearTimeout(timer);timer=setTimeout(()=>load(currentPath||initialPath),180)};
     window.addEventListener('autosubs:job-event',sync);
-    if (open) load(initialPath);
     return()=>{window.removeEventListener('autosubs:job-event',sync);if(timer)clearTimeout(timer)};
   });
 </script>
