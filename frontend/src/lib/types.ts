@@ -15,7 +15,8 @@ export interface Preset {
 }
 export interface BrandAssets { defaultOutro?:string; logo?:string }
 export interface Brand { id:string; name:string; description:string; assets:BrandAssets; presetIds:string[]; defaultPresetByFormat:Partial<Record<FormatKey,string>> }
-export interface Workflow { id:string; name:string; watchDir:string; outputDir:string; archiveDir:string; brandId?:string; format:FormatProfile; presetId?:string; enabled:boolean }
+export type WorkflowOutput = 'video-only'|'video-srt';
+export interface Workflow { id:string; name:string; watchDir:string; outputDir:string; archiveDir:string; outputMode:WorkflowOutput; brandId?:string; format:FormatProfile; presetId?:string; enabled:boolean }
 export type JobOutro = {mode:'inherit'} | {mode:'none'} | {mode:'asset';assetId:string};
 export interface Job { id:string; originalName:string; status:JobStatus; progress?:number; lines?:SubtitleLine[]; error?:string; inputPath?:string; outputPath?:string; presetId?:string; format:FormatProfile; outro:JobOutro; workflowId?:string; archiveAfterSuccess:boolean; attachedSidecar?:string; createdAtMs:number; updatedAtMs:number }
 export type EncoderKind = 'auto'|'libx264'|'libx265'|'nvenc_h264'|'nvenc_hevc'|'qsv_h264'|'vaapi_h264'|'vulkan_h264'|'amf_h264';
@@ -27,5 +28,5 @@ export interface SettingsView {
 }
 export interface Asset { id:string; name:string; storedFile:string; mime:string; size:number; createdAtMs:number }
 export interface BrowseEntry { name:string; path:string; isDir:boolean; size?:number; modifiedMs?:number; selectable:boolean }
-export interface BrowseResponse { currentPath:string; parentPath?:string; entries:BrowseEntry[]; roots:string[] }
+export interface BrowseResponse { currentPath:string; parentPath?:string; entries:BrowseEntry[]; roots:string[]; favorites:string[] }
 export interface Capabilities { ffmpeg:boolean; h264Nvenc:boolean; hevcNvenc:boolean; h264Qsv:boolean; h264Vaapi:boolean; h264Vulkan:boolean; h264Amf:boolean; vaapiDevice?:string; vulkanDevice?:string; h264BenchmarksMs:Record<string,number>; autoEncoderOrder:EncoderKind[]; libass:boolean }
