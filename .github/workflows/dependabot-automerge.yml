@@ -1,30 +1,90 @@
 name: Dependabot auto-merge
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_run:
+    workflows: [CI, CodeQL, Dependency Review]
+    types: [completed]
 
 permissions:
+  actions: write
+  checks: read
   contents: write
   pull-requests: write
+  statuses: read
 
 concurrency:
-  group: dependabot-automerge-${{ github.event.pull_request.number }}
+  group: dependabot-merge-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:
-  enable:
-    name: Enable protected auto-merge
+  merge:
+    name: Merge protected dependency update
     if: >-
-      github.repository == 'GodsQuantum/AutoSubs' &&
-      github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.event.pull_request.draft == false
+      github.event.workflow_run.event == 'pull_request' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Enable rebase auto-merge on the exact Dependabot head
+      - name: Verify exact Dependabot PR and required checks
+        id: gate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: gh pr merge --auto --rebase --match-head-commit "$HEAD_SHA" "$PR_URL"
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          echo "publish_image=false" >> "$GITHUB_OUTPUT"
+
+          if [[ -z "${PR_NUMBER:-}" ]]; then
+            echo "No pull request attached to this workflow run."
+            exit 0
+          fi
+
+          PR_JSON="$(gh api "repos/$REPO/pulls/$PR_NUMBER")"
+          AUTHOR="$(jq -r '.user.login' <<<"$PR_JSON")"
+          STATE="$(jq -r '.state' <<<"$PR_JSON")"
+          DRAFT="$(jq -r '.draft' <<<"$PR_JSON")"
+          BASE="$(jq -r '.base.ref' <<<"$PR_JSON")"
+          HEAD_SHA="$(jq -r '.head.sha' <<<"$PR_JSON")"
+
+          if [[ "$AUTHOR" != "dependabot[bot]" || "$STATE" != "open" || "$DRAFT" != "false" || "$BASE" != "main" ]]; then
+            echo "PR is not an eligible open Dependabot update against main."
+            exit 0
+          fi
+
+          if [[ "$HEAD_SHA" != "$WORKFLOW_HEAD_SHA" ]]; then
+            echo "Ignoring stale workflow completion for $WORKFLOW_HEAD_SHA; current head is $HEAD_SHA."
+            exit 0
+          fi
+
+          if ! gh pr checks "$PR_NUMBER" --repo "$REPO" --required; then
+            echo "Required checks are not all successful yet."
+            exit 0
+          fi
+
+          FILES="$(gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only)"
+          if grep -Eq '^(Dockerfile|Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|src/|frontend/)' <<<"$FILES"; then
+            echo "publish_image=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Rebase-merge exact green Dependabot head
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
+        run: gh pr merge "$PR_NUMBER" --repo "$REPO" --rebase --match-head-commit "$HEAD_SHA"
+
+      - name: Publish latest when runtime inputs changed
+        if: steps.gate.outputs.ready == 'true' && steps.gate.outputs.publish_image == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: gh workflow run image.yml --repo "$REPO" --ref main
