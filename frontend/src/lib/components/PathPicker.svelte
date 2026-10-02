@@ -21,8 +21,17 @@
   let error = '';
   let filter = '';
   let filterInput: HTMLInputElement | undefined;
+  let modalElement: HTMLDivElement | undefined;
   let returnFocus: HTMLElement | null = null;
   const requestGate = createLatestRequestGate();
+  const focusableSelector = [
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[href]',
+    '[tabindex]:not([tabindex="-1"])'
+  ].join(',');
 
   async function load(path = '') {
     const requestVersion = requestGate.begin();
@@ -49,9 +58,29 @@
     tick().then(() => target?.focus());
   }
   function handleKeydown(event: KeyboardEvent) {
-    if (open && event.key === 'Escape') {
+    if (!open) return;
+    if (event.key === 'Escape') {
       event.preventDefault();
       close();
+      return;
+    }
+    if (event.key !== 'Tab' || !modalElement) return;
+    const focusable = Array.from(modalElement.querySelectorAll<HTMLElement>(focusableSelector))
+      .filter((element) => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true');
+    if (focusable.length === 0) {
+      event.preventDefault();
+      modalElement.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !modalElement.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
     }
   }
   function activate(entry: BrowseEntry) {
@@ -93,18 +122,18 @@
 
 {#if open}
   <div class="modal-backdrop" role="presentation" on:click={(e)=>{ if(e.currentTarget===e.target)close(); }}>
-    <div class="modal" role="dialog" aria-modal="true" aria-label={title || $dictionary.filePicker} aria-busy={loading}>
+    <div class="modal" role="dialog" aria-modal="true" aria-label={title || $dictionary.filePicker} aria-busy={loading} bind:this={modalElement} tabindex="-1">
       <div class="modal-head">
         <strong>{title || $dictionary.filePicker}</strong>
-        <button class="btn icon ghost" on:click={close} aria-label={$dictionary.close}>��</button>
+        <button class="btn icon ghost" on:click={close} aria-label={$dictionary.close}>������</button>
       </div>
       <div class="picker-path mono" title={currentPath}>{currentPath || $dictionary.loading}</div>
       <div class="picker-list">
         <div class="picker-toolbar">
-          {#if parentPath}<button class="btn" on:click={()=>load(parentPath)}>��� {$dictionary.back}</button>{/if}
+          {#if parentPath}<button class="btn" on:click={()=>load(parentPath)}>��������� {$dictionary.back}</button>{/if}
           <input class="input" bind:this={filterInput} bind:value={filter} placeholder={$dictionary.filter} aria-label={$dictionary.filter} />
-          <button class="btn icon" on:click={()=>load(currentPath)} aria-label={$dictionary.refresh}>���</button>
-          <button class="btn icon" class:favorite-active={favoriteCurrent} on:click={toggleFavorite} aria-label={favoriteCurrent?$dictionary.removeFavorite:$dictionary.addFavorite} title={favoriteCurrent?$dictionary.removeFavorite:$dictionary.addFavorite}>{favoriteCurrent?'���':'���'}</button>
+          <button class="btn icon" on:click={()=>load(currentPath)} aria-label={$dictionary.refresh}>���������</button>
+          <button class="btn icon" class:favorite-active={favoriteCurrent} on:click={toggleFavorite} aria-label={favoriteCurrent?$dictionary.removeFavorite:$dictionary.addFavorite} title={favoriteCurrent?$dictionary.removeFavorite:$dictionary.addFavorite}>{favoriteCurrent?'���������':'���������'}</button>
         </div>
         {#if roots.length > 1 || favorites.length}
           <div class="picker-shortcuts">
@@ -119,18 +148,18 @@
             {#if favorites.length}
               <div class="picker-favorites">
                 <span class="field-label">{$dictionary.favorites}</span>
-                <div class="row wrap">{#each favorites as favorite}<button class="btn ghost favorite-chip" class:active={favorite===currentPath} on:click={()=>load(favorite)} title={favorite}>��� {pathLabel(favorite)}</button>{/each}</div>
+                <div class="row wrap">{#each favorites as favorite}<button class="btn ghost favorite-chip" class:active={favorite===currentPath} on:click={()=>load(favorite)} title={favorite}>��������� {pathLabel(favorite)}</button>{/each}</div>
               </div>
             {/if}
           </div>
         {/if}
-        {#if loading}<div class="empty">{$dictionary.loading}</div>
-        {:else if error}<div class="empty" style="color:var(--danger)">{error}</div>
+        {#if loading}<div class="empty" aria-live="polite">{$dictionary.loading}</div>
+        {:else if error}<div class="empty" role="alert" style="color:var(--danger)">{error}</div>
         {:else if filtered.length===0}<div class="empty">{$dictionary.noEntries}</div>
         {:else}
           {#each filtered as entry}
             <button class="picker-row" on:dblclick={()=>activate(entry)} on:click={()=> entry.isDir ? load(entry.path) : entry.selectable && activate(entry)}>
-              <span>{entry.isDir ? '���' : '���'}</span>
+              <span>{entry.isDir ? '���������' : '���������'}</span>
               <span><strong>{entry.name}</strong><span class="meta mono">{entry.path}</span></span>
               {#if !entry.isDir && entry.size !== undefined}<span class="meta">{Math.max(1,Math.round(entry.size/1024/1024))} MB</span>{/if}
             </button>
