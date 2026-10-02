@@ -1,1 +1,3 @@
-* @GodsQuantum
+# Application code still requests owner review. Dependency metadata and CI files are handled by protected Dependabot auto-merge.
+src/** @GodsQuantum
+frontend/src/** @GodsQuantum
