@@ -6,6 +6,10 @@ updates:
       interval: weekly
     labels: [dependencies, rust]
     open-pull-requests-limit: 10
+    groups:
+      cargo-updates:
+        applies-to: version-updates
+        patterns: ["*"]
 
   - package-ecosystem: npm
     directory: /frontend
@@ -13,6 +17,10 @@ updates:
       interval: weekly
     labels: [dependencies, frontend]
     open-pull-requests-limit: 10
+    groups:
+      frontend-updates:
+        applies-to: version-updates
+        patterns: ["*"]
 
   - package-ecosystem: docker
     directory: /
@@ -20,6 +28,10 @@ updates:
       interval: weekly
     labels: [dependencies, docker]
     open-pull-requests-limit: 5
+    groups:
+      docker-updates:
+        applies-to: version-updates
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -28,14 +40,6 @@ updates:
     labels: [dependencies, github-actions]
     open-pull-requests-limit: 10
     groups:
-      codeql-suite:
-        patterns:
-          - "github/codeql-action/*"
-      actions-minor-patch:
-        patterns:
-          - "*"
-        exclude-patterns:
-          - "github/codeql-action/*"
-        update-types:
-          - minor
-          - patch
+      actions-updates:
+        applies-to: version-updates
+        patterns: ["*"]
