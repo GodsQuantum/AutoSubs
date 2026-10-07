@@ -30,3 +30,31 @@ test('v3.4.0 integration docs expose the shipped version and lifecycle API', asy
     assert.ok(changelog.toLowerCase().includes(topic.toLowerCase()), `missing changelog topic: ${topic}`);
   }
 });
+
+test('native AppImage workflow builds and attaches both Linux architectures', async () => {
+  const [workflow, release, builder] = await Promise.all([
+    readFile(new URL('.github/workflows/appimage.yml', root), 'utf8'),
+    readFile(new URL('.github/workflows/release.yml', root), 'utf8'),
+    readFile(new URL('packaging/appimage/build.sh', root), 'utf8')
+  ]);
+
+  for (const arch of ['x86_64', 'aarch64']) {
+    assert.ok(workflow.includes(`arch: ${arch}`), `missing AppImage architecture: ${arch}`);
+  }
+  assert.match(workflow, /ubuntu-24\.04-arm/);
+  assert.match(workflow, /packaging\/appimage\/build\.sh/);
+  assert.match(workflow, /ffmpegReady/);
+  assert.match(workflow, /libass/);
+  assert.match(workflow, /actions\/upload-artifact/);
+  assert.match(workflow, /AUTOSUBS_APPIMAGE_OPEN_BROWSER/);
+  assert.match(workflow, /APPIMAGE_EXTRACT_AND_RUN/);
+
+  assert.match(release, /uses:\s+\.\/\.github\/workflows\/appimage\.yml/);
+  assert.match(release, /actions\/download-artifact/);
+  assert.match(release, /gh release upload/);
+  assert.match(release, /\.AppImage/);
+  assert.match(release, /\.sha256/);
+
+  assert.match(builder, /linuxdeploy/);
+  assert.match(builder, /appimagetool/);
+});
