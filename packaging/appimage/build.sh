@@ -59,22 +59,41 @@ fc_list=$(resolve_runtime_tool AUTOSUBS_FC_LIST fc-list)
 fc_scan=$(resolve_runtime_tool AUTOSUBS_FC_SCAN fc-scan)
 curl_bin=$(resolve_runtime_tool AUTOSUBS_CURL curl)
 
-if [ -n "${AUTOSUBS_LINUXDEPLOY:-}" ] && [ -n "${AUTOSUBS_APPIMAGETOOL:-}" ]; then
+ca_cert_file="${AUTOSUBS_CA_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}"
+require_file "$ca_cert_file"
+
+libjack="${AUTOSUBS_LIBJACK:-}"
+if [ -z "$libjack" ] && command -v ldd >/dev/null 2>&1; then
+  libjack=$(ldd "$ffmpeg" 2>/dev/null | awk '$1 == "libjack.so.0" { print $3; exit }')
+fi
+if [ -z "$libjack" ] && ldd "$ffmpeg" 2>/dev/null | grep -Fq 'libjack.so.0'; then
+  printf 'ffmpeg requires libjack.so.0, but the packaging host cannot resolve it\n' >&2
+  exit 69
+fi
+if [ -n "$libjack" ]; then
+  require_file "$libjack"
+fi
+
+if [ -n "${AUTOSUBS_LINUXDEPLOY:-}" ] && [ -n "${AUTOSUBS_APPIMAGETOOL:-}" ] && [ -n "${AUTOSUBS_APPIMAGE_RUNTIME:-}" ]; then
   linuxdeploy=$AUTOSUBS_LINUXDEPLOY
   appimagetool=$AUTOSUBS_APPIMAGETOOL
+  appimage_runtime=$AUTOSUBS_APPIMAGE_RUNTIME
 else
   cache_root="${XDG_CACHE_HOME:-${HOME:?HOME is required when XDG_CACHE_HOME is unset}/.cache}"
   tool_cache="$cache_root/autosubs/appimage-tools/$arch"
   "$FETCH" "$arch" "$tool_cache" >/dev/null
   linuxdeploy="$tool_cache/linuxdeploy-$arch.AppImage"
   appimagetool="$tool_cache/appimagetool-$arch.AppImage"
+  appimage_runtime="$tool_cache/runtime-$arch"
 fi
 require_exec "$linuxdeploy"
 require_exec "$appimagetool"
+require_file "$appimage_runtime"
 
 rm -rf -- "$build_dir"
 mkdir -p -- \
   "$appdir/usr/bin" \
+  "$appdir/usr/lib" \
   "$appdir/usr/share/autosubs/frontend" \
   "$appdir/usr/share/applications" \
   "$appdir/usr/share/icons/hicolor/scalable/apps" \
@@ -95,8 +114,9 @@ copy_runtime "$ffprobe" ffprobe
 copy_runtime "$fc_list" fc-list
 copy_runtime "$fc_scan" fc-scan
 copy_runtime "$curl_bin" curl
+cp -- "$ca_cert_file" "$appdir/usr/share/autosubs/ca-certificates.crt"
 
-APPIMAGE_EXTRACT_AND_RUN=1 "$linuxdeploy" \
+set -- \
   --appdir "$appdir" \
   --executable "$appdir/usr/bin/autosubs" \
   --executable "$appdir/usr/bin/ffmpeg" \
@@ -104,6 +124,18 @@ APPIMAGE_EXTRACT_AND_RUN=1 "$linuxdeploy" \
   --executable "$appdir/usr/bin/fc-list" \
   --executable "$appdir/usr/bin/fc-scan" \
   --executable "$appdir/usr/bin/curl"
+if [ -n "$libjack" ]; then
+  set -- "$@" --library "$libjack"
+fi
+APPIMAGE_EXTRACT_AND_RUN=1 "$linuxdeploy" "$@"
+
+# linuxdeploy intentionally excludes JACK as a host/audio-system library, but
+# Ubuntu's ffmpeg links to it unconditionally. AutoSubs only needs FFmpeg for
+# file processing, so carry this small compatibility library explicitly to
+# keep the bundled FFmpeg usable on hosts without JACK installed.
+if [ -n "$libjack" ]; then
+  cp -L -- "$libjack" "$appdir/usr/lib/libjack.so.0"
+fi
 
 cp -a -- "$frontend/." "$appdir/usr/share/autosubs/frontend/"
 cp -- "$ROOT/packaging/appimage/AppRun" "$appdir/AppRun"
@@ -116,7 +148,7 @@ sed \
   > "$appdir/usr/share/applications/io.github.GodsQuantum.AutoSubs.desktop"
 
 cp -- "$ROOT/packaging/appimage/io.github.GodsQuantum.AutoSubs.metainfo.xml" \
-  "$appdir/usr/share/metainfo/io.github.GodsQuantum.AutoSubs.metainfo.xml"
+  "$appdir/usr/share/metainfo/io.github.GodsQuantum.AutoSubs.appdata.xml"
 cp -- "$ROOT/docs/logo.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/autosubs.svg"
 
 ln -s "usr/share/applications/io.github.GodsQuantum.AutoSubs.desktop" \
@@ -128,7 +160,7 @@ if command -v desktop-file-validate >/dev/null 2>&1; then
   desktop-file-validate "$appdir/usr/share/applications/io.github.GodsQuantum.AutoSubs.desktop"
 fi
 if command -v appstreamcli >/dev/null 2>&1; then
-  appstreamcli validate --no-net "$appdir/usr/share/metainfo/io.github.GodsQuantum.AutoSubs.metainfo.xml"
+  appstreamcli validate --no-net "$appdir/usr/share/metainfo/io.github.GodsQuantum.AutoSubs.appdata.xml"
 fi
 
 if [ -z "${SOURCE_DATE_EPOCH:-}" ] && command -v git >/dev/null 2>&1; then
@@ -139,7 +171,7 @@ fi
 output="$out_dir/AutoSubs-$version-$arch.AppImage"
 rm -f -- "$output" "$output.sha256"
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$arch" VERSION="$version" \
-  "$appimagetool" "$appdir" "$output"
+  "$appimagetool" --runtime-file "$appimage_runtime" "$appdir" "$output"
 chmod +x "$output"
 (
   cd "$out_dir"
