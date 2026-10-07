@@ -64,6 +64,8 @@ test('native AppImage workflow builds and attaches both Linux architectures', as
   assert.match(release, /gh release upload/);
   assert.match(release, /\.AppImage/);
   assert.match(release, /\.sha256/);
+  assert.match(release, /if TAG_SHA="\$\(gh api/);
+  assert.doesNotMatch(release, /TAG_SHA=.*gh api.*\|\| true/);
 
   assert.match(builder, /linuxdeploy/);
   assert.match(builder, /appimagetool/);
