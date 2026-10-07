@@ -1,0 +1,113 @@
+#!/bin/sh
+set -eu
+
+if [ -z "${APPDIR:-}" ]; then
+  APPDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+  export APPDIR
+fi
+
+OPEN_BROWSER="${AUTOSUBS_APPIMAGE_OPEN_BROWSER:-1}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --background|--no-browser)
+      OPEN_BROWSER=0
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [ -z "${HOME:-}" ]; then
+  printf '%s\n' "AutoSubs AppImage requires HOME or explicit writable XDG/AUTOSUBS paths." >&2
+  exit 64
+fi
+
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+
+AUTOSUBS_CONFIG_DIR="${AUTOSUBS_CONFIG_DIR:-$XDG_CONFIG_HOME/autosubs}"
+AUTOSUBS_DATA_DIR="${AUTOSUBS_DATA_DIR:-$XDG_DATA_HOME/autosubs}"
+AUTOSUBS_FONTS_DIR="${AUTOSUBS_FONTS_DIR:-$AUTOSUBS_DATA_DIR/fonts}"
+AUTOSUBS_APPIMAGE_STATE_DIR="${AUTOSUBS_APPIMAGE_STATE_DIR:-$XDG_STATE_HOME/autosubs}"
+AUTOSUBS_DIST_DIR="${AUTOSUBS_DIST_DIR:-$APPDIR/usr/share/autosubs/frontend}"
+AUTOSUBS_HOST="${AUTOSUBS_HOST:-127.0.0.1}"
+AUTOSUBS_PORT="${AUTOSUBS_PORT:-3051}"
+
+mkdir -p -- "$AUTOSUBS_CONFIG_DIR" "$AUTOSUBS_DATA_DIR" "$AUTOSUBS_FONTS_DIR" "$AUTOSUBS_APPIMAGE_STATE_DIR"
+
+if [ -z "${AUTOSUBS_ALLOWED_ROOTS:-}" ]; then
+  AUTOSUBS_ALLOWED_ROOTS="$AUTOSUBS_DATA_DIR:$HOME"
+  for candidate in /mnt /media; do
+    if [ -d "$candidate" ]; then
+      AUTOSUBS_ALLOWED_ROOTS="$AUTOSUBS_ALLOWED_ROOTS:$candidate"
+    fi
+  done
+  if [ -n "${USER:-}" ] && [ -d "/run/media/$USER" ]; then
+    AUTOSUBS_ALLOWED_ROOTS="$AUTOSUBS_ALLOWED_ROOTS:/run/media/$USER"
+  fi
+fi
+
+export AUTOSUBS_CONFIG_DIR AUTOSUBS_DATA_DIR AUTOSUBS_FONTS_DIR
+export AUTOSUBS_APPIMAGE_STATE_DIR AUTOSUBS_DIST_DIR AUTOSUBS_ALLOWED_ROOTS
+export AUTOSUBS_HOST AUTOSUBS_PORT
+
+ORIGINAL_PATH="${PATH:-/usr/bin:/bin}"
+if [ "${AUTOSUBS_USE_SYSTEM_MEDIA_TOOLS:-0}" = "1" ]; then
+  PATH="$ORIGINAL_PATH:$APPDIR/usr/bin"
+else
+  PATH="$APPDIR/usr/bin:$ORIGINAL_PATH"
+fi
+export PATH
+
+BROWSER_HOST="$AUTOSUBS_HOST"
+case "$BROWSER_HOST" in
+  0.0.0.0|::|'[::]') BROWSER_HOST=127.0.0.1 ;;
+esac
+URL="http://$BROWSER_HOST:$AUTOSUBS_PORT/"
+HEALTH_URL="${URL}api/v1/health"
+
+health_ready() {
+  command -v curl >/dev/null 2>&1 || return 1
+  curl -fsS --max-time 1 "$HEALTH_URL" 2>/dev/null | grep -q '"status":"ok"'
+}
+
+open_url() {
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL" >/dev/null 2>&1 || true
+  elif command -v gio >/dev/null 2>&1; then
+    gio open "$URL" >/dev/null 2>&1 || true
+  else
+    printf 'AutoSubs: %s\n' "$URL" >&2
+  fi
+}
+
+if health_ready; then
+  if [ "$OPEN_BROWSER" != "0" ]; then
+    open_url
+  fi
+  exit 0
+fi
+
+if [ "$OPEN_BROWSER" != "0" ]; then
+  (
+    count=0
+    while [ "$count" -lt 120 ]; do
+      if health_ready; then
+        open_url
+        exit 0
+      fi
+      count=$((count + 1))
+      sleep 0.25
+    done
+    printf 'AutoSubs started but the browser helper could not confirm readiness. Open %s manually.\n' "$URL" >&2
+  ) &
+fi
+
+if [ "${AUTOSUBS_APPIMAGE_FORCE_STDIO:-0}" = "1" ] || [ -t 1 ]; then
+  exec "$APPDIR/usr/bin/autosubs" "$@"
+fi
+
+exec "$APPDIR/usr/bin/autosubs" "$@" >>"$AUTOSUBS_APPIMAGE_STATE_DIR/autosubs.log" 2>&1
