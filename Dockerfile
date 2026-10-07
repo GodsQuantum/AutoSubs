@@ -6,6 +6,8 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
 COPY Cargo.toml CHANGELOG.md README.md /src/
+COPY .github/workflows/appimage.yml .github/workflows/release.yml /src/.github/workflows/
+COPY packaging/appimage/build.sh /src/packaging/appimage/
 RUN npm run check && npm test && npm run build
 
 FROM rust:1.98.1-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS builder
