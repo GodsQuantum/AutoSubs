@@ -264,6 +264,14 @@ pub struct Preset {
     #[serde(default)]
     pub shadow_thickness: Option<f64>,
     #[serde(default)]
+    pub shadow_offset_x: Option<f64>,
+    #[serde(default)]
+    pub shadow_offset_y: Option<f64>,
+    #[serde(default)]
+    pub shadow_blur: Option<f64>,
+    #[serde(default)]
+    pub shadow_opacity: Option<u8>,
+    #[serde(default)]
     pub shadow_color: Option<String>,
     #[serde(default = "default_border_style")]
     pub border_style: u8,
@@ -306,7 +314,11 @@ impl Default for Preset {
             font_family: default_font(),
             uppercase: true,
             outline_thickness: default_outline(),
-            shadow_thickness: Some(1.5),
+            shadow_thickness: None,
+            shadow_offset_x: Some(1.5),
+            shadow_offset_y: Some(1.5),
+            shadow_blur: Some(0.0),
+            shadow_opacity: Some(100),
             shadow_color: Some(default_black()),
             border_style: default_border_style(),
             floating: false,
@@ -331,6 +343,28 @@ impl Preset {
         }
         if let Some(legacy) = self.legacy_aspect_ratio.take() {
             self.format = FormatProfile::from_legacy_aspect_ratio(&legacy);
+            changed = true;
+        }
+        if self.shadow_offset_x.is_none() || self.shadow_offset_y.is_none() {
+            let legacy = self.shadow_thickness.unwrap_or(0.0).max(0.0);
+            if self.shadow_offset_x.is_none() {
+                self.shadow_offset_x = Some(legacy);
+            }
+            if self.shadow_offset_y.is_none() {
+                self.shadow_offset_y = Some(legacy);
+            }
+            changed = true;
+        }
+        if self.shadow_blur.is_none() {
+            self.shadow_blur = Some(0.0);
+            changed = true;
+        }
+        if self.shadow_opacity.is_none() {
+            self.shadow_opacity = Some(100);
+            changed = true;
+        }
+        if self.shadow_thickness.is_some() {
+            self.shadow_thickness = None;
             changed = true;
         }
         if self.max_chars == 0 {
@@ -382,6 +416,10 @@ pub struct Brand {
     pub preset_ids: Vec<String>,
     #[serde(default)]
     pub default_preset_by_format: BTreeMap<FormatKey, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_keywords: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlight_color: Option<String>,
 }
 
 impl Brand {
@@ -460,6 +498,10 @@ fn default_model() -> String {
 fn default_lang() -> String {
     std::env::var("AUTOSUBS_TRANSCRIPTION_LANGUAGE").unwrap_or_else(|_| "fr".into())
 }
+fn default_alignment_model() -> String {
+    std::env::var("AUTOSUBS_ALIGNMENT_MODEL")
+        .unwrap_or_else(|_| "facebook/wav2vec2-large-xlsr-53-french".into())
+}
 fn default_llm_prompt() -> String {
     "Corrige uniquement l'orthographe, la grammaire et la ponctuation. Garde exactement le même nombre de blocs et leur ordre. Renvoie uniquement les blocs corrigés, un par ligne.".into()
 }
@@ -485,6 +527,14 @@ pub struct Settings {
     pub local_transcription_api_key: String,
     #[serde(default)]
     pub local_transcription_model: String,
+    #[serde(default)]
+    pub alignment_enabled: bool,
+    #[serde(default)]
+    pub alignment_url: String,
+    #[serde(default)]
+    pub alignment_api_key: String,
+    #[serde(default = "default_alignment_model")]
+    pub alignment_model: String,
     #[serde(default)]
     pub llm_enabled: bool,
     #[serde(default)]
@@ -523,6 +573,12 @@ impl Default for Settings {
                 .unwrap_or_default(),
             local_transcription_model: std::env::var("AUTOSUBS_LOCAL_TRANSCRIPTION_MODEL")
                 .unwrap_or_else(|_| "large-v3".into()),
+            alignment_enabled: std::env::var("AUTOSUBS_ALIGNMENT_ENABLED")
+                .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+                .unwrap_or(false),
+            alignment_url: std::env::var("AUTOSUBS_ALIGNMENT_URL").unwrap_or_default(),
+            alignment_api_key: std::env::var("AUTOSUBS_ALIGNMENT_API_KEY").unwrap_or_default(),
+            alignment_model: default_alignment_model(),
             llm_enabled: false,
             llm_endpoint: String::new(),
             llm_api_key: String::new(),
@@ -572,6 +628,16 @@ impl Default for Encoder {
             preset: "medium".into(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderProfile {
+    #[default]
+    Auto,
+    Fast,
+    Quality,
+    Compact,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -632,8 +698,22 @@ pub struct Job {
     pub output_path: Option<PathBuf>,
     #[serde(default)]
     pub preset_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_preset: Option<Preset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_brand_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing_quality: Option<TimingQuality>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing_fallback: Option<String>,
     #[serde(default)]
     pub format: FormatProfile,
+    #[serde(default)]
+    pub render_profile: RenderProfile,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_render_encoder: Option<EncoderKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_render_elapsed_ms: Option<u64>,
     #[serde(default)]
     pub outro: JobOutro,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -707,6 +787,23 @@ mod tests {
         assert_eq!(preset.format.fit, FitMode::Cover);
         assert!(!preset.id.is_empty());
         assert!(preset.legacy_aspect_ratio.is_none());
+    }
+
+    #[test]
+    fn legacy_shadow_migrates_to_explicit_offsets_blur_and_opacity() {
+        let mut preset: Preset = serde_json::from_value(serde_json::json!({
+            "name": "Legacy shadow",
+            "shadowThickness": 2.5,
+            "shadowColor": "#123456"
+        }))
+        .unwrap();
+
+        assert!(preset.migrate());
+        assert_eq!(preset.shadow_offset_x, Some(2.5));
+        assert_eq!(preset.shadow_offset_y, Some(2.5));
+        assert_eq!(preset.shadow_blur, Some(0.0));
+        assert_eq!(preset.shadow_opacity, Some(100));
+        assert_eq!(preset.shadow_color.as_deref(), Some("#123456"));
     }
 
     #[test]

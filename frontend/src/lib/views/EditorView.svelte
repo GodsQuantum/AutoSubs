@@ -2,9 +2,9 @@
   import { api, sourceVideoUrl, subtitleExportUrl } from '$lib/api';
   import { dictionary } from '$lib/i18n';
   import { subtitlesToVtt } from '$lib/captions.js';
-  import { splitSubtitleLine, mergeSubtitleLines, deleteSubtitleLine, removeTerminalPeriods } from '$lib/subtitle-edit.js';
+  import { splitSubtitleLine, mergeSubtitleLines, deleteSubtitleLine, insertSubtitleLineBreak, nudgeSubtitleWordBoundary, removeTerminalPeriods } from '$lib/subtitle-edit.js';
   import { fetchDownload, saveDownload } from '$lib/download.js';
-  import type { Asset, Brand, FontFace, FormatKey, FitMode, FormatProfile, Job, JobOutro, Preset, SubtitleLine } from '$lib/types';
+  import type { Asset, Brand, EncoderKind, FontFace, FormatKey, FitMode, FormatProfile, Job, JobOutro, Preset, RenderOptions, RenderProfile, SubtitleLine } from '$lib/types';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import PathPicker from '$lib/components/PathPicker.svelte';
   import FormatPreview from '$lib/components/FormatPreview.svelte';
@@ -44,25 +44,69 @@
   let report:{repairedLineOverlaps:number;retimedWordLines:number;droppedEmptyLines:number}|undefined;
   let punctuationBackup:SubtitleLine[]|undefined;
   let previewFormat:FormatProfile={key:'source',fit:'preserve'};
+  let renderProfile:RenderProfile='auto';
+  let renderOptions:RenderOptions|undefined;
+  let renderOptionsJobId='';
+  let renderOptionsLoading=false;
 
   $: if(job && job.id!==loadedId){ loadedId=job.id; hydrate(job); }
   $: locked = job ? ['pending','uploading','probing','transcribing','correcting','rendering'].includes(job.status) : true;
   $: activeLine = lines.findIndex(l=>currentTime>=l.start&&currentTime<l.end);
   $: activeText = activeLine>=0 ? lines[activeLine]?.text ?? '' : '';
   $: activeWords = activeLine>=0 ? lines[activeLine]?.words : undefined;
-  $: currentPreset = presets.find(p=>p.id===selectedPreset);
+  $: currentPreset = (job?.effectivePreset?.id===selectedPreset ? job.effectivePreset : undefined) ?? presets.find(p=>p.id===selectedPreset);
   $: captionTrackUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(subtitlesToVtt(lines))}`;
   $: if(formatKey!==previousFormatKey){previousFormatKey=formatKey;if(formatKey==='source')fit='preserve';else if(fit==='preserve')fit='cover';}
-  $: currentBrand = brands.find(brand=>brand.id===currentPreset?.brandId);
+  $: currentBrand = brands.find(brand=>brand.id===(job?.resolvedBrandId ?? currentPreset?.brandId));
   $: inheritedOutroId = currentPreset?.outroVideo || currentBrand?.assets.defaultOutro || '';
   $: inheritedOutro = assets.find(asset=>asset.id===inheritedOutroId);
   $: videoAssets = assets.filter(asset=>asset.mime.startsWith('video/'));
   $: previewFormat={key:formatKey,fit:formatKey==='source'?'preserve':fit,width:formatKey==='custom'?Number(customWidth):undefined,height:formatKey==='custom'?Number(customHeight):undefined};
+  $: currentRenderOption=renderOptions?.options.find(option=>option.profile===renderProfile);
+  $: if(job?.id && job.effectivePreset && job.id!==renderOptionsJobId) loadRenderOptions(job.id);
+
+  async function loadRenderOptions(id:string){
+    renderOptionsJobId=id;
+    renderOptionsLoading=true;
+    try{
+      const options=await api.renderOptions(id);
+      if(renderOptionsJobId===id)renderOptions=options;
+    }catch{
+      if(renderOptionsJobId===id)renderOptions=undefined;
+    }finally{
+      if(renderOptionsJobId===id)renderOptionsLoading=false;
+    }
+  }
+
+  function renderProfileLabel(profile:RenderProfile){
+    return profile==='auto'?$dictionary.renderAuto:profile==='fast'?$dictionary.renderFast:profile==='quality'?$dictionary.renderQuality:$dictionary.renderCompact;
+  }
+  function renderProfileHint(profile:RenderProfile){
+    return profile==='auto'?$dictionary.renderAutoHint:profile==='fast'?$dictionary.renderFastHint:profile==='quality'?$dictionary.renderQualityHint:$dictionary.renderCompactHint;
+  }
+  function encoderLabel(kind:EncoderKind|undefined){
+    if(!kind)return '';
+    const labels:Record<EncoderKind,string>={
+      auto:$dictionary.auto,libx264:$dictionary.libx264,libx265:$dictionary.libx265,nvenc_h264:$dictionary.nvencH264,nvenc_hevc:$dictionary.nvencHevc,qsv_h264:$dictionary.qsvH264,vaapi_h264:$dictionary.vaapiH264,vulkan_h264:$dictionary.vulkanH264,amf_h264:$dictionary.amfH264
+    };
+    return labels[kind];
+  }
+  function estimateLabel(){
+    if(!currentRenderOption)return '';
+    const estimate=currentRenderOption.estimate;
+    const basis=estimate.basis==='history'?$dictionary.historyEstimate:$dictionary.initialEstimate;
+    return `≈ ${estimate.minSeconds}–${estimate.maxSeconds} s · ${basis}`;
+  }
 
   function hydrate(j:Job){
     lines=(j.lines??[]).map(l=>({...l,words:l.words?.map(w=>({...w}))})); dirty=false; report=undefined; punctuationBackup=undefined;
-    selectedPreset=j.presetId??''; formatKey=j.format?.key??'source'; fit=j.format?.fit??'preserve'; previousFormatKey=formatKey; customWidth=j.format?.width??1080; customHeight=j.format?.height??1920;
-    const p=presets.find(p=>p.id===selectedPreset); if(p){maxChars=p.maxChars;maxLines=p.maxLines;}
+    selectedPreset=j.presetId??j.effectivePreset?.id??'';
+    const effective=j.effectivePreset??presets.find(p=>p.id===selectedPreset);
+    const effectiveFormat=effective?.format??j.format;
+    formatKey=effectiveFormat?.key??'source'; fit=effectiveFormat?.fit??'preserve'; previousFormatKey=formatKey; customWidth=effectiveFormat?.width??1080; customHeight=effectiveFormat?.height??1920;
+    if(effective){maxChars=effective.maxChars;maxLines=effective.maxLines;}
+    renderProfile=j.renderProfile??'auto';
+    renderOptions=undefined;renderOptionsJobId='';
     outroChoice=j.outro?.mode==='asset'?`asset:${j.outro.assetId}`:j.outro?.mode??'inherit';
   }
   function mark(){dirty=true;}
@@ -88,13 +132,15 @@
     dirty=true;
   }
   function split(i:number){const textarea=textareas[i];lines=splitSubtitleLine(lines,i,textarea?.selectionStart??Math.floor(lines[i].text.length/2));dirty=true}
+  function lineBreak(i:number){const textarea=textareas[i];lines=insertSubtitleLineBreak(lines,i,textarea?.selectionStart??Math.floor(lines[i].text.length/2));dirty=true}
+  function nudgeWord(i:number,wordIndex:number,boundary:'start'|'end',deltaMs:number){lines=nudgeSubtitleWordBoundary(lines,i,wordIndex,boundary,deltaMs);dirty=true}
   function merge(i:number){lines=mergeSubtitleLines(lines,i);dirty=true}
   function remove(i:number){lines=deleteSubtitleLine(lines,i);dirty=true}
   async function applyJob():Promise<boolean>{
     if(!job)return false;
     if(dirty && !(await save()))return false;
     if(formatKey==='custom' && (!Number.isInteger(Number(customWidth))||!Number.isInteger(Number(customHeight))||Number(customWidth)<16||Number(customHeight)<16||Number(customWidth)>16384||Number(customHeight)>16384||Number(customWidth)%2!==0||Number(customHeight)%2!==0)){notify('error',`${$dictionary.custom}: ${$dictionary.width} × ${$dictionary.height}`);return false;}
-    try{await api.updateJob(job.id,{presetId:selectedPreset||null,format:previewFormat,outro:jobOutro()});if(selectedPreset&&lines.length)lines=await api.regroup(job.id,maxChars,maxLines);await refresh();notify('success',$dictionary.saved);return true}catch(e){notify('error',e instanceof Error?e.message:String(e));return false}
+    try{let applied:Job|undefined;if(selectedPreset){applied=await api.applyPreset(job.id,selectedPreset);lines=(applied.lines??lines).map(l=>({...l,words:l.words?.map(w=>({...w}))}));}await api.updateJob(job.id,{format:previewFormat,outro:jobOutro(),renderProfile});const effective=applied?.effectivePreset??job.effectivePreset;if(lines.length&&(!effective||effective.maxChars!==Number(maxChars)||effective.maxLines!==Number(maxLines)))lines=await api.regroup(job.id,Number(maxChars),Number(maxLines));await refresh();renderOptionsJobId='';notify('success',$dictionary.saved);return true}catch(e){notify('error',e instanceof Error?e.message:String(e));return false}
   }
   async function render(){if(!job)return;try{if(dirty && !(await save()))return;if(!(await applyJob()))return;await api.render(job.id);await refresh()}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
   async function removeSidecar(){if(!job)return;try{await api.removeSidecar(job.id);await refresh();notify('success',$dictionary.prepared)}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
@@ -117,10 +163,19 @@
     <div class="editor-layout">
       <div class="editor-left">
         <div class="video-stage" style="padding:14px">
-          <FormatPreview format={previewFormat} preset={currentPreset} {fonts} text={activeText} words={activeWords} currentTime={currentTime} videoSrc={sourceVideoUrl(job.id)} controls={true} videoId="autosubs-editor-video" captionsSrc={captionTrackUrl} {safeZone} onVideoTimeUpdate={(time)=>currentTime=time}/>
+          <FormatPreview format={previewFormat} preset={currentPreset} {fonts} text={activeText} words={activeWords} currentTime={currentTime} videoSrc={sourceVideoUrl(job.id)} jobId={job.id} controls={true} videoId="autosubs-editor-video" captionsSrc={captionTrackUrl} {safeZone} onVideoTimeUpdate={(time)=>currentTime=time}/>
         </div>
         <div class="row between wrap">
-          <div class="resource-meta"><span class="chip">{formatKey==='source'?$dictionary.sourceFormat:formatKey==='portrait916'?'9:16':formatKey==='landscape169'?'16:9':formatKey==='square11'?'1:1':formatKey==='portrait45'?'4:5':`${customWidth}×${customHeight}`}</span><span class="chip">{formatKey==='source'?$dictionary.preserve:fit}</span></div>
+          <div class="resource-meta">
+            <span class="chip">{formatKey==='source'?$dictionary.sourceFormat:formatKey==='portrait916'?'9:16':formatKey==='landscape169'?'16:9':formatKey==='square11'?'1:1':formatKey==='portrait45'?'4:5':`${customWidth}×${customHeight}`}</span>
+            <span class="chip">{formatKey==='source'?$dictionary.preserve:fit}</span>
+            {#if currentPreset}<span class="chip">{$dictionary.preset}: {currentPreset.name}</span>{/if}
+            {#if currentBrand}<span class="chip">{$dictionary.brand}: {currentBrand.name}</span>{/if}
+            <span class="chip">{$dictionary.timingQualityLabel}: {job.timingQuality??'inferred'}{#if job.timingFallback} · fallback{/if}</span>
+            <span class="chip">{maxChars} × {maxLines}</span>
+            {#if currentPreset}<span class="chip" style={`border-color:${currentPreset.highlightColor}`}>{$dictionary.highlightColor}: {currentPreset.highlightColor}</span>{/if}
+            {#if job.lastRenderEncoder}<span class="chip">{$dictionary.actualEncoder}: {encoderLabel(job.lastRenderEncoder)}</span>{/if}
+          </div>
           <div class="segmented"><button class:active={safeZone==='off'} on:click={()=>safeZone='off'}>{$dictionary.none}</button><button class:active={safeZone==='generic'} on:click={()=>safeZone='generic'}>Generic</button><button class:active={safeZone==='tiktok'} on:click={()=>safeZone='tiktok'}>TikTok</button><button class:active={safeZone==='reels'} on:click={()=>safeZone='reels'}>Reels</button><button class:active={safeZone==='shorts'} on:click={()=>safeZone='shorts'}>Shorts</button></div>
         </div>
         <section class="card">
@@ -143,7 +198,26 @@
                   <input class="input mono" type="number" step="0.01" bind:value={line.end} disabled={locked} on:input={mark}/>
                   <textarea class="textarea" bind:this={textareas[i]} bind:value={line.text} disabled={locked} on:input={mark}></textarea>
                   <button class="btn icon ghost" on:click={()=>jump(line)} title={$dictionary.jumpToLine}>▶</button>
-                  <div class="row wrap" style="grid-column:2/-1"><button class="btn" disabled={locked} on:click={()=>split(i)}>{$dictionary.split}</button><button class="btn" disabled={locked||i===0} on:click={()=>merge(i-1)}>{$dictionary.mergePrevious}</button><button class="btn" disabled={locked||i===lines.length-1} on:click={()=>merge(i)}>{$dictionary.mergeNext}</button><button class="btn danger" disabled={locked} on:click={()=>remove(i)}>{$dictionary.delete}</button></div>
+                  <div class="row wrap" style="grid-column:2/-1"><button class="btn" disabled={locked} on:click={()=>lineBreak(i)}>↵ {$dictionary.lineBreak}</button><button class="btn" disabled={locked} on:click={()=>split(i)}>{$dictionary.split}</button><button class="btn" disabled={locked||i===0} on:click={()=>merge(i-1)}>{$dictionary.mergePrevious}</button><button class="btn" disabled={locked||i===lines.length-1} on:click={()=>merge(i)}>{$dictionary.mergeNext}</button><button class="btn danger" disabled={locked} on:click={()=>remove(i)}>{$dictionary.delete}</button></div>
+                  {#if i===activeLine && line.words?.length}
+                    <div class="stack" style="grid-column:2/-1;gap:6px">
+                      <div class="help">{$dictionary.wordTiming} · {$dictionary.nudgeHint}</div>
+                      <div class="row wrap">
+                        {#each line.words as word, wordIndex}
+                          <div class="chip" style="display:grid;gap:4px;min-width:150px">
+                            <strong>{word.word}</strong>
+                            <span class="mono small">{word.start.toFixed(3)} → {word.end.toFixed(3)} s</span>
+                            <span class="row" style="gap:3px">
+                              <button class="btn icon ghost" disabled={locked} title={$dictionary.wordStart + ' −10 ms'} on:click={()=>nudgeWord(i,wordIndex,'start',-10)}>S−</button>
+                              <button class="btn icon ghost" disabled={locked} title={$dictionary.wordStart + ' +10 ms'} on:click={()=>nudgeWord(i,wordIndex,'start',10)}>S+</button>
+                              <button class="btn icon ghost" disabled={locked} title={$dictionary.wordEnd + ' −10 ms'} on:click={()=>nudgeWord(i,wordIndex,'end',-10)}>E−</button>
+                              <button class="btn icon ghost" disabled={locked} title={$dictionary.wordEnd + ' +10 ms'} on:click={()=>nudgeWord(i,wordIndex,'end',10)}>E+</button>
+                            </span>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -164,6 +238,27 @@
             <div class="field"><label for="editor-outro">{$dictionary.outroOverride}</label><select id="editor-outro" class="select" bind:value={outroChoice} disabled={locked}><option value="inherit">{$dictionary.inheritPresetOutro}</option><option value="none">{$dictionary.noOutro}</option>{#each videoAssets as asset}<option value={`asset:${asset.id}`}>{asset.name}</option>{/each}</select></div>
             {#if outroChoice==='inherit'}
               <div class="help">{$dictionary.inheritedOutro}: {inheritedOutro?.name || $dictionary.noOutro}</div>
+            {/if}
+            <div class="field">
+              <label for="editor-render-profile">{$dictionary.renderProfile}</label>
+              <select id="editor-render-profile" class="select" bind:value={renderProfile} disabled={locked}>
+                <option value="auto">{renderProfileLabel('auto')}</option>
+                <option value="fast">{renderProfileLabel('fast')}</option>
+                <option value="quality">{renderProfileLabel('quality')}</option>
+                <option value="compact">{renderProfileLabel('compact')}</option>
+              </select>
+              <span class="help">{renderProfileHint(renderProfile)}</span>
+            </div>
+            {#if renderOptionsLoading}
+              <div class="help">{$dictionary.loading}</div>
+            {:else if currentRenderOption}
+              <div class="resource-meta">
+                <span class="chip">{encoderLabel(currentRenderOption.encoder)}</span>
+                <span class="chip">{$dictionary.estimatedTime}: {estimateLabel()}</span>
+              </div>
+            {/if}
+            {#if renderOptions?.actualEncoder}
+              <div class="help">{$dictionary.actualEncoder}: {encoderLabel(renderOptions.actualEncoder)}{#if renderOptions.lastElapsedMs} · {(renderOptions.lastElapsedMs/1000).toFixed(1)} s{/if}</div>
             {/if}
             <div class="help">{$dictionary.sourcePreserveHint}</div>
             <button class="btn" disabled={locked} on:click={applyJob}>{$dictionary.applyToJob}</button>

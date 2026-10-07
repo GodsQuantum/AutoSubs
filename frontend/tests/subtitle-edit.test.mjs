@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitSubtitleLine, mergeSubtitleLines, deleteSubtitleLine } from '../src/lib/subtitle-edit.js';
+import {
+  splitSubtitleLine,
+  mergeSubtitleLines,
+  deleteSubtitleLine,
+  insertSubtitleLineBreak,
+  nudgeSubtitleWordBoundary
+} from '../src/lib/subtitle-edit.js';
 
 const line = {
   id: 4, start: 0, end: 3, text: 'hello world again',
@@ -27,6 +33,23 @@ test('mergeSubtitleLines combines adjacent timed words', () => {
 
 test('deleteSubtitleLine removes only the selected block', () => {
   assert.deepEqual(deleteSubtitleLine([line, { ...line, id: 5 }], 0).map(({ id }) => id), [5]);
+});
+
+test('insertSubtitleLineBreak changes only visual text and preserves canonical word timings', () => {
+  const result = insertSubtitleLineBreak([line], 0, 11);
+  assert.equal(result[0].text, 'hello world\nagain');
+  assert.deepEqual(result[0].words, line.words);
+  assert.equal(result[0].start, line.start);
+  assert.equal(result[0].end, line.end);
+});
+
+test('nudgeSubtitleWordBoundary respects adjacent word boundaries', () => {
+  const moved = nudgeSubtitleWordBoundary([line], 0, 1, 'start', -500);
+  assert.equal(moved[0].words[1].start, 1);
+  const endMoved = nudgeSubtitleWordBoundary([line], 0, 1, 'end', 250);
+  assert.equal(endMoved[0].words[1].end, 2);
+  const precise = nudgeSubtitleWordBoundary([line], 0, 1, 'start', 50);
+  assert.equal(precise[0].words[1].start, 1.05);
 });
 
 test('removeTerminalPeriods strips only caption-ending full stops', async () => {

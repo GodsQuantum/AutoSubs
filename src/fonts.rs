@@ -6,7 +6,14 @@ use std::{
     process::Command,
 };
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FontSource {
+    App,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FontFace {
     pub id: String,
@@ -16,15 +23,90 @@ pub struct FontFace {
     pub weight: u16,
     pub italic: bool,
     pub file_name: String,
+    pub source: FontSource,
 }
 
 const FONTS_ROOT: &str = "/fonts";
 
 pub fn scan_fonts() -> Result<Vec<FontFace>> {
-    scan_fonts_from(Path::new(FONTS_ROOT))
+    scan_catalog(Path::new(FONTS_ROOT))
 }
 
-fn scan_fonts_from(root: &Path) -> Result<Vec<FontFace>> {
+pub fn scan_catalog(app_root: &Path) -> Result<Vec<FontFace>> {
+    let app = scan_app_fonts(app_root)?;
+    let system = scan_system_fonts()?;
+    Ok(merge_catalogs(app, system))
+}
+
+pub fn merge_catalogs(app: Vec<FontFace>, system: Vec<FontFace>) -> Vec<FontFace> {
+    use std::collections::BTreeSet;
+    let mut seen = BTreeSet::new();
+    let mut merged = Vec::new();
+    for face in app.into_iter().chain(system) {
+        let identity = format!(
+            "{}|{}|{}|{}|{}",
+            face.family.to_lowercase(),
+            face.full_name.to_lowercase(),
+            face.style.to_lowercase(),
+            face.weight,
+            face.italic
+        );
+        if seen.insert(identity) {
+            merged.push(face);
+        }
+    }
+    merged.sort_by(|left, right| {
+        left.family
+            .to_lowercase()
+            .cmp(&right.family.to_lowercase())
+            .then_with(|| left.weight.cmp(&right.weight))
+            .then_with(|| left.style.cmp(&right.style))
+    });
+    merged
+}
+
+fn scan_system_fonts() -> Result<Vec<FontFace>> {
+    let output = match Command::new("fc-list")
+        .arg("--format=%{file}\t%{family}\t%{fullname}\t%{style}\t%{weight}\n")
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return Ok(Vec::new()),
+    };
+    let mut faces = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut fields = line.splitn(5, '\t');
+        let Some(file) = fields.next().filter(|value| !value.trim().is_empty()) else {
+            continue;
+        };
+        let path = PathBuf::from(file);
+        if !path.is_file() || !is_font_file(&path) {
+            continue;
+        }
+        let family = fields.next().unwrap_or_default();
+        let full_name = fields.next().unwrap_or_default();
+        let style = fields.next().unwrap_or("Regular");
+        let weight = fields.next().unwrap_or("80");
+        let Some((family, full_name, style, weight, italic)) =
+            parse_fc_scan_output(&format!("{family}\n{full_name}\n{style}\n{weight}\n"))
+        else {
+            continue;
+        };
+        faces.push(FontFace {
+            id: format!("system-{}", stable_id(&path.to_string_lossy())),
+            family: title_name(&family),
+            full_name: title_name(&full_name),
+            style: title_name(&style),
+            weight,
+            italic,
+            file_name: path.to_string_lossy().into_owned(),
+            source: FontSource::System,
+        });
+    }
+    Ok(faces)
+}
+
+pub fn scan_app_fonts(root: &Path) -> Result<Vec<FontFace>> {
     if !root.is_dir() {
         return Ok(Vec::new());
     }
@@ -34,10 +116,10 @@ fn scan_fonts_from(root: &Path) -> Result<Vec<FontFace>> {
 }
 
 pub fn resolve_font_content(id: &str) -> Result<PathBuf> {
-    resolve_font_content_from(Path::new(FONTS_ROOT), id)
+    resolve_app_font_content(Path::new(FONTS_ROOT), id)
 }
 
-fn resolve_font_content_from(root: &Path, id: &str) -> Result<PathBuf> {
+pub fn resolve_app_font_content(root: &Path, id: &str) -> Result<PathBuf> {
     if id.is_empty() || !id.len().is_multiple_of(2) || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
         bail!("invalid font id")
     }
@@ -56,6 +138,9 @@ fn resolve_font_content_from(root: &Path, id: &str) -> Result<PathBuf> {
 pub fn css(fonts: &[FontFace]) -> String {
     let mut stylesheet = String::new();
     for font in fonts {
+        if font.source != FontSource::App {
+            continue;
+        }
         let source_format = match font
             .file_name
             .rsplit(char::from(46))
@@ -111,6 +196,7 @@ where
                 .unwrap()
                 .to_string_lossy()
                 .into_owned(),
+            source: FontSource::App,
         });
     }
 
@@ -148,6 +234,10 @@ fn font_paths(root: &Path) -> Result<(PathBuf, Vec<PathBuf>)> {
     paths.dedup();
 
     Ok((root, paths))
+}
+
+pub fn valid_font_file(path: &Path) -> bool {
+    path.is_file() && is_font_file(path) && metadata(path).is_some()
 }
 
 fn metadata(path: &Path) -> Option<(String, String, String, u16, bool)> {
@@ -245,6 +335,15 @@ fn font_id(relative: &Path) -> String {
         .collect()
 }
 
+fn stable_id(value: &str) -> String {
+    let mut hash = 14695981039346656037u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    format!("{hash:016x}")
+}
+
 fn css_escape(value: &str) -> String {
     value
         .replace(char::from(92), &format!("{0}{0}", char::from(92)))
@@ -258,6 +357,34 @@ fn css_escape(value: &str) -> String {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn app_fonts_take_precedence_over_system_faces_with_same_identity() {
+        let app = FontFace {
+            id: "app".into(),
+            family: "Studio Sans".into(),
+            full_name: "Studio Sans Regular".into(),
+            style: "Regular".into(),
+            weight: 400,
+            italic: false,
+            file_name: "StudioSans.ttf".into(),
+            source: FontSource::App,
+        };
+        let system = FontFace {
+            id: "system".into(),
+            family: "Studio Sans".into(),
+            full_name: "Studio Sans Regular".into(),
+            style: "Regular".into(),
+            weight: 400,
+            italic: false,
+            file_name: "/usr/share/fonts/StudioSans.ttf".into(),
+            source: FontSource::System,
+        };
+
+        let merged = merge_catalogs(vec![app.clone()], vec![system]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], app);
+    }
 
     #[test]
     fn scans_every_supported_font_file_even_with_duplicate_metadata() {
@@ -297,10 +424,10 @@ mod tests {
         fs::write(root.path().join("safe.ttf"), b"font").unwrap();
         let id = font_id(std::path::Path::new("safe.ttf"));
         assert_eq!(
-            resolve_font_content_from(root.path(), &id).unwrap(),
+            resolve_app_font_content(root.path(), &id).unwrap(),
             root.path().join("safe.ttf")
         );
-        assert!(resolve_font_content_from(root.path(), "2e2e2f6576696c2e747466").is_err());
+        assert!(resolve_app_font_content(root.path(), "2e2e2f6576696c2e747466").is_err());
     }
 
     #[test]
@@ -332,6 +459,7 @@ mod tests {
             weight: metadata.3,
             italic: metadata.4,
             file_name: "LeagueSpartan.ttf".into(),
+            source: FontSource::App,
         };
         let stylesheet = css(&[face]);
         assert!(stylesheet.contains("font-family:\"League Spartan\""));
@@ -341,6 +469,6 @@ mod tests {
     #[test]
     fn missing_fonts_directory_is_an_empty_catalog() {
         let root = tempfile::tempdir().unwrap().path().join("missing");
-        assert!(scan_fonts_from(&root).unwrap().is_empty());
+        assert!(scan_app_fonts(&root).unwrap().is_empty());
     }
 }

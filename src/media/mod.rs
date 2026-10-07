@@ -1,3 +1,4 @@
+pub mod align;
 pub mod probe;
 pub mod process;
 pub mod render;
@@ -6,5 +7,5 @@ pub mod transcribe;
 pub use probe::{MediaProbe, probe_media};
 pub use render::{
     EncoderCapabilities, RenderPlan, auto_encoder_order, build_render_plan,
-    detect_encoder_capabilities, render_video,
+    detect_encoder_capabilities, render_video, resolve_render_policy,
 };

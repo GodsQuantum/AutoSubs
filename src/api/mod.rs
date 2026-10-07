@@ -4,6 +4,7 @@ pub mod events;
 pub mod fonts;
 pub mod jobs;
 pub mod media;
+pub mod preview;
 pub mod resources;
 pub mod settings;
 pub mod uploads;
@@ -46,7 +47,13 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/capabilities", get(capabilities))
-        .route("/api/v1/fonts", get(fonts::list))
+        .route("/api/v1/preview/frame", post(preview::frame))
+        .route(
+            "/api/v1/fonts",
+            get(fonts::list)
+                .post(fonts::upload)
+                .layer(DefaultBodyLimit::disable()),
+        )
         .route("/api/v1/fonts/css", get(fonts::stylesheet))
         .route("/api/v1/fonts/{id}/content", get(fonts::content))
         .route("/api/v1/events", get(events::events))
@@ -59,6 +66,10 @@ pub fn router() -> Router<AppState> {
                 .delete(jobs::delete),
         )
         .route("/api/v1/jobs/{id}/prepare", post(jobs::prepare))
+        .route(
+            "/api/v1/jobs/{id}/render-options",
+            get(jobs::render_options),
+        )
         .route("/api/v1/jobs/{id}/render", post(jobs::render))
         .route("/api/v1/jobs/{id}/cancel", post(jobs::cancel))
         .route("/api/v1/jobs/{id}/retranscribe", post(jobs::retranscribe))
@@ -71,6 +82,7 @@ pub fn router() -> Router<AppState> {
             get(jobs::export_subtitles),
         )
         .route("/api/v1/jobs/{id}/regroup", post(jobs::regroup))
+        .route("/api/v1/jobs/{id}/apply-preset", post(jobs::apply_preset))
         .route(
             "/api/v1/jobs/{id}/sidecar",
             put(jobs::set_sidecar).delete(jobs::remove_sidecar),

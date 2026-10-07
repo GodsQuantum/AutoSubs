@@ -1,4 +1,4 @@
-use crate::domain::{Encoder, EncoderKind, FitMode, FormatKey, Preset};
+use crate::domain::{Encoder, EncoderKind, FitMode, FormatKey, Preset, RenderProfile};
 use crate::media::probe::MediaProbe;
 use crate::media::process::ProcessError;
 use std::{collections::BTreeMap, path::Path, time::Instant};
@@ -22,6 +22,12 @@ pub struct EncoderCapabilities {
     pub h264_benchmarks_ms: BTreeMap<String, u64>,
     pub auto_encoder_order: Vec<EncoderKind>,
     pub libass: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderPolicy {
+    pub encoder: Encoder,
+    pub fallback_order: Vec<EncoderKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +58,68 @@ pub fn auto_encoder_order(caps: &EncoderCapabilities) -> Vec<EncoderKind> {
     .into_iter()
     .filter_map(|(available, encoder)| available.then_some(encoder))
     .collect()
+}
+
+pub fn resolve_render_policy(
+    profile: RenderProfile,
+    advanced: &Encoder,
+    caps: &EncoderCapabilities,
+) -> RenderPolicy {
+    let mut fallback_order = match profile {
+        RenderProfile::Auto if advanced.kind != EncoderKind::Auto => {
+            vec![advanced.kind.clone()]
+        }
+        RenderProfile::Auto | RenderProfile::Fast => auto_encoder_order(caps),
+        RenderProfile::Quality => match advanced.kind {
+            EncoderKind::NvencH264
+            | EncoderKind::QsvH264
+            | EncoderKind::VaapiH264
+            | EncoderKind::VulkanH264
+            | EncoderKind::AmfH264
+            | EncoderKind::Libx264 => vec![advanced.kind.clone()],
+            _ => vec![EncoderKind::Libx264],
+        },
+        RenderProfile::Compact => {
+            let mut order = Vec::new();
+            if caps.hevc_nvenc {
+                order.push(EncoderKind::NvencHevc);
+            }
+            order.push(EncoderKind::Libx265);
+            order
+        }
+    };
+
+    if !fallback_order.contains(&EncoderKind::Libx264) {
+        fallback_order.push(EncoderKind::Libx264);
+    }
+    fallback_order.dedup();
+
+    let mut encoder = advanced.clone();
+    encoder.kind = fallback_order
+        .first()
+        .cloned()
+        .unwrap_or(EncoderKind::Libx264);
+
+    match profile {
+        RenderProfile::Auto => {}
+        RenderProfile::Fast => {
+            encoder.quality = encoder.quality.max(21);
+            encoder.preset = "veryfast".into();
+        }
+        RenderProfile::Quality => {
+            encoder.quality = encoder.quality.min(18);
+            encoder.preset = "slow".into();
+        }
+        RenderProfile::Compact => {
+            encoder.quality = encoder.quality.max(23);
+            encoder.preset = "medium".into();
+        }
+    }
+
+    RenderPolicy {
+        encoder,
+        fallback_order,
+    }
 }
 
 fn resolved_encoder(settings: &Encoder, caps: &EncoderCapabilities) -> EncoderKind {
@@ -181,6 +249,32 @@ fn chain(parts: impl IntoIterator<Item = String>) -> String {
         .join(",")
 }
 
+pub fn visual_filter_chain(
+    preset: &Preset,
+    source: &MediaProbe,
+    ass: &Path,
+    fonts_dir: Option<&Path>,
+    hardware_upload: bool,
+) -> anyhow::Result<String> {
+    let ass_filter = match fonts_dir {
+        Some(fonts) => format!(
+            "ass='{}':fontsdir='{}'",
+            ffmpeg_filter_escape(ass),
+            ffmpeg_filter_escape(fonts)
+        ),
+        None => format!("ass='{}'", ffmpeg_filter_escape(ass)),
+    };
+    Ok(chain([
+        geometry_chain(preset, source)?,
+        ass_filter,
+        if hardware_upload {
+            "format=nv12,hwupload".to_owned()
+        } else {
+            String::new()
+        },
+    ]))
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "render-plan construction keeps independent FFmpeg resources explicit"
@@ -198,20 +292,8 @@ pub fn build_render_plan(
 ) -> anyhow::Result<RenderPlan> {
     let target = target_resolution(preset, source)?;
     let encoder = resolved_encoder(encoder_settings, caps);
-    let ass_filter = match fonts_dir {
-        Some(fonts) => format!(
-            "ass='{}':fontsdir='{}'",
-            ffmpeg_filter_escape(ass),
-            ffmpeg_filter_escape(fonts)
-        ),
-        None => format!("ass='{}'", ffmpeg_filter_escape(ass)),
-    };
-    let hardware_upload = uses_hardware_upload(&encoder).then(|| "format=nv12,hwupload".to_owned());
-    let main_video = chain([
-        geometry_chain(preset, source)?,
-        ass_filter,
-        hardware_upload.clone().unwrap_or_default(),
-    ]);
+    let hardware_upload = uses_hardware_upload(&encoder);
+    let main_video = visual_filter_chain(preset, source, ass, fonts_dir, hardware_upload)?;
     let mut args = vec!["-y".into()];
     match &encoder {
         EncoderKind::VaapiH264 => {
@@ -283,17 +365,7 @@ pub fn build_render_plan(
                 )
             };
             let complex = if uses_hardware_upload(&encoder) {
-                let main_video_cpu = chain([
-                    geometry_chain(preset, source)?,
-                    match fonts_dir {
-                        Some(fonts) => format!(
-                            "ass='{}':fontsdir='{}'",
-                            ffmpeg_filter_escape(ass),
-                            ffmpeg_filter_escape(fonts)
-                        ),
-                        None => format!("ass='{}'", ffmpeg_filter_escape(ass)),
-                    },
-                ]);
+                let main_video_cpu = visual_filter_chain(preset, source, ass, fonts_dir, false)?;
                 format!(
                     "[0:v]{main_video_cpu}[mainv];[1:v]{outro_video}[outv];{main_audio};{outro_audio};[mainv][maina][outv][outa]concat=n=2:v=1:a=1[vjoin][aout];[vjoin]format=nv12,hwupload[vout]"
                 )
@@ -698,6 +770,44 @@ mod tests {
     }
 
     #[test]
+    fn preview_and_final_render_share_the_same_visual_filter_chain() {
+        let preset = Preset {
+            format: FormatProfile {
+                key: FormatKey::Portrait916,
+                fit: FitMode::Cover,
+                width: None,
+                height: None,
+            },
+            ..Preset::default()
+        };
+        let source = source();
+        let final_chain = visual_filter_chain(
+            &preset,
+            &source,
+            Path::new("sub.ass"),
+            Some(Path::new("/fonts")),
+            false,
+        )
+        .unwrap();
+        let preview_chain = visual_filter_chain(
+            &preset,
+            &source,
+            Path::new("sub.ass"),
+            Some(Path::new("/fonts")),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(preview_chain, final_chain);
+        assert!(final_chain.contains("ass='sub.ass':fontsdir='/fonts'"));
+        let target = target_resolution(&preset, &source).unwrap();
+        assert!(
+            final_chain.contains(&format!("crop={}:{}", target.0, target.1)),
+            "{final_chain}"
+        );
+    }
+
+    #[test]
     fn source_preserve_does_not_crop_or_scale() {
         let preset = Preset::default();
         let plan = build_render_plan(
@@ -905,6 +1015,82 @@ mod tests {
             auto_encoder_order(&caps),
             vec![EncoderKind::VulkanH264, EncoderKind::VaapiH264]
         );
+    }
+
+    #[test]
+    fn fast_profile_prefers_runtime_ranked_hardware_and_keeps_software_fallback() {
+        let caps = EncoderCapabilities {
+            h264_vaapi: true,
+            h264_vulkan: true,
+            auto_encoder_order: vec![EncoderKind::VulkanH264, EncoderKind::VaapiH264],
+            ..Default::default()
+        };
+        let policy = resolve_render_policy(RenderProfile::Fast, &Encoder::default(), &caps);
+        assert_eq!(policy.encoder.kind, EncoderKind::VulkanH264);
+        assert_eq!(
+            policy.fallback_order,
+            vec![
+                EncoderKind::VulkanH264,
+                EncoderKind::VaapiH264,
+                EncoderKind::Libx264
+            ]
+        );
+        assert_eq!(policy.encoder.preset, "veryfast");
+    }
+
+    #[test]
+    fn compact_profile_prefers_hevc_and_has_compatible_last_resort() {
+        let caps = EncoderCapabilities {
+            hevc_nvenc: true,
+            ..Default::default()
+        };
+        let policy = resolve_render_policy(RenderProfile::Compact, &Encoder::default(), &caps);
+        assert_eq!(policy.encoder.kind, EncoderKind::NvencHevc);
+        assert_eq!(
+            policy.fallback_order,
+            vec![
+                EncoderKind::NvencHevc,
+                EncoderKind::Libx265,
+                EncoderKind::Libx264
+            ]
+        );
+    }
+
+    #[test]
+    fn quality_profile_is_explicit_high_quality_h264_policy() {
+        let policy = resolve_render_policy(
+            RenderProfile::Quality,
+            &Encoder::default(),
+            &EncoderCapabilities::default(),
+        );
+        assert_eq!(policy.encoder.kind, EncoderKind::Libx264);
+        assert!(policy.encoder.quality <= 18);
+        assert_eq!(policy.encoder.preset, "slow");
+    }
+
+    #[test]
+    fn quality_profile_honors_explicit_h264_override_but_not_hevc() {
+        let caps = EncoderCapabilities {
+            h264_vulkan: true,
+            vulkan_device: Some("0".into()),
+            ..Default::default()
+        };
+        let hardware = Encoder {
+            kind: EncoderKind::VulkanH264,
+            quality: 20,
+            preset: "medium".into(),
+        };
+        let hardware_policy = resolve_render_policy(RenderProfile::Quality, &hardware, &caps);
+        assert_eq!(hardware_policy.encoder.kind, EncoderKind::VulkanH264);
+        assert!(hardware_policy.encoder.quality <= 18);
+
+        let hevc = Encoder {
+            kind: EncoderKind::NvencHevc,
+            quality: 20,
+            preset: "medium".into(),
+        };
+        let hevc_policy = resolve_render_policy(RenderProfile::Quality, &hevc, &caps);
+        assert_eq!(hevc_policy.encoder.kind, EncoderKind::Libx264);
     }
 
     #[test]

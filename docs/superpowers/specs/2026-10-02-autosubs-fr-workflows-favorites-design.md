@@ -1,7 +1,7 @@
 # AutoSubs — French segmentation, workflows, archives and picker favorites
 
 ## Goal
-Make AutoSubs robust for French short-form production: no stray spaces around hyphenated compounds, no orphaned French function words at caption boundaries, explicit workflow output artifacts, bundle archiving after success, persistent folder favorites, and clean access to Cloud9 media storage.
+Make AutoSubs robust for French short-form production: no stray spaces around hyphenated compounds, no orphaned French function words at caption boundaries, explicit workflow output artifacts, bundle archiving after success, persistent folder favorites, and clean access to mounted media storage.
 
 ## Constraints
 - Existing manual editor exports remain available.

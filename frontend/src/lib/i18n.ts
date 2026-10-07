@@ -40,6 +40,10 @@ const en = {
   localProvider:'Local provider', primaryProvider:'Primary provider', testModels:'List models',
   remove:'Remove', chooseAsset:'Choose asset', assetName:'Asset name', noAssets:'No assets yet', noPresets:'No presets yet', noBrands:'No brands yet', noWorkflows:'No workflows yet',
   saveBeforeRender:'Save subtitle edits before rendering.', renderComplete:'Render complete', prepared:'Prepared',
+  renderProfile:'Render profile', renderAuto:'Auto — recommended', renderFast:'Fast', renderQuality:'Quality', renderCompact:'Compact',
+  renderAutoHint:'Fastest validated stable encoder for this runtime.', renderFastHint:'Prefer the fastest validated hardware H.264 path.', renderQualityHint:'Higher-quality H.264 policy; slower when software encoding is selected.', renderCompactHint:'HEVC when available; smaller files, slower and less universally compatible.',
+  estimatedTime:'Estimated time', initialEstimate:'initial estimate', historyEstimate:'learned from render history', actualEncoder:'Actual encoder',
+  resolvedState:'Resolved state', timingQualityLabel:'Timing', lineBreak:'Line break', wordTiming:'Word timing', wordStart:'Word start', wordEnd:'Word end', nudgeHint:'10 ms nudge; boundaries remain constrained by adjacent words.',
   appName:'AutoSubs'
 };
 
@@ -82,6 +86,10 @@ const fr: typeof en = {
   localProvider:'Fournisseur local', primaryProvider:'Fournisseur principal', testModels:'Lister les modèles',
   remove:'Retirer', chooseAsset:'Choisir un asset', assetName:"Nom de l’asset", noAssets:'Aucun asset', noPresets:'Aucun preset', noBrands:'Aucune marque', noWorkflows:'Aucun workflow',
   saveBeforeRender:'Enregistrez les modifications des sous-titres avant le rendu.', renderComplete:'Rendu terminé', prepared:'Préparé',
+  renderProfile:'Profil de rendu', renderAuto:'Auto — recommandé', renderFast:'Rapide', renderQuality:'Qualité', renderCompact:'Compact',
+  renderAutoHint:'Encodeur stable validé le plus rapide sur cette machine.', renderFastHint:'Privilégie le chemin matériel H.264 validé le plus rapide.', renderQualityHint:'Politique H.264 de meilleure qualité ; plus lente si le logiciel est retenu.', renderCompactHint:'HEVC si disponible ; fichiers plus petits, rendu plus lent et compatibilité moindre.',
+  estimatedTime:'Temps estimé', initialEstimate:'estimation initiale', historyEstimate:'appris sur l’historique des rendus', actualEncoder:'Encodeur réel',
+  resolvedState:'État résolu', timingQualityLabel:'Timing', lineBreak:'Saut de ligne', wordTiming:'Timing des mots', wordStart:'Début du mot', wordEnd:'Fin du mot', nudgeHint:'Ajustement de 10 ms ; les bornes restent contraintes par les mots voisins.',
   appName:'AutoSubs'
 };
 

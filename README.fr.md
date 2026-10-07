@@ -44,6 +44,7 @@ Le navigateur n'est pas le moteur métier. Rust possède la normalisation des ti
 - **Picker serveur + favoris** — les vidéos déjà montées dans le conteneur ne sont pas recopiées inutilement ; un dossier peut être ajouté aux favoris persistants pour le retrouver immédiatement.
 - **Sidecars** — import `.ass`, `.ssa`, `.srt` ou JSON AutoSubs; ajout, remplacement ou suppression avant rendu.
 - **Transcription** — endpoint externe compatible OpenAI + fournisseur local/fallback type Speaches.
+- **Forced alignment optionnel** — transcription et précision temporelle restent deux étapes séparées : AutoSubs peut valider les bornes mot-à-mot renvoyées par un aligner HTTP compatible WhisperX et revenir automatiquement aux timings natifs si l’alignement est indisponible ou invalide.
 - **Correction LLM optionnelle** — orthographe et ponctuation sans laisser le modèle modifier directement les timings.
 - **Un seul moteur de timing** — Rust répare plages invalides, chevauchements, gaps et timings de mots. Le frontend ne possède pas une deuxième implémentation divergente.
 - **Découpage Unicode/français** — comptage par graphèmes, opportunités Unicode et règles de non-coupure françaises.
@@ -87,7 +88,7 @@ Ouvre `http://<ip-du-serveur>:3051`.
 ```text
 /config             SSD / filesystem local — SQLite uniquement
 /data               données de travail — uploads/jobs/renders
-/fonts              polices custom, lecture seule possible
+/fonts              polices gérées par l'app — écriture requise pour l’import depuis l’UI
 /srv/media/...        sources/sorties/archives volumineuses
 ```
 
@@ -97,7 +98,7 @@ Les variables ont été renommées pour éviter les ambiguïtés :
 
 ```text
 DATA_DIR         → AUTOSUBS_DATA_DIR=/data
-FONTS_DIR        → supprimée : monte le dossier de polices hôte sur /fonts
+FONTS_DIR        → AUTOSUBS_FONTS_DIR=/fonts (chemin interne configurable)
 DIST_DIR         → supprimée : l'UI est intégrée directement à l'image
 MAX_ENCODE_JOBS  → AUTOSUBS_MAX_RENDER_JOBS
 SPEACHES_URL     → AUTOSUBS_LOCAL_TRANSCRIPTION_URL
@@ -111,7 +112,7 @@ Un montage ancien du type `/srv/autosubs/data:/app/data` doit être séparé :
 volumes:
   - /srv/autosubs/config:/config
   - /srv/autosubs/data:/data
-  - /srv/autosubs/fonts:/fonts:ro
+  - /srv/autosubs/fonts:/fonts
   - /srv/media:/srv/media
 ```
 
@@ -122,8 +123,8 @@ volumes:
 3. La correction LLM optionnelle ne touche qu'au texte.
 4. Le moteur Rust normalise timings et regroupement.
 5. Le job arrive à **Prêt**. Aucun encodage vidéo n'a encore été dépensé si le rendu immédiat n'a pas été demandé.
-6. Corrige/scinde/fusionne/supprime/recherche/remplace/regroupe/décale dans l'Éditeur. **Supprimer les points finaux** nettoie en lot les captions short-form tout en conservant virgules, !, ?, et points de suspension ; l'action peut être annulée avant enregistrement. La timeline canonique reste disponible pour les regroupements ultérieurs.
-7. Exporte SRT/ASS/JSON sans réencoder, ou lance **Rendre la vidéo**.
+6. Corrige/scinde/fusionne/supprime/recherche/remplace/regroupe/décale dans l'Éditeur. Tu peux insérer un saut de ligne visuel sans retimer les mots et ajuster les bornes mot par mot par pas de 10 ms, contraintes par les mots voisins. **Supprimer les points finaux** nettoie en lot les captions short-form tout en conservant virgules, !, ?, et points de suspension ; l'action peut être annulée avant enregistrement. La timeline canonique reste disponible pour les regroupements ultérieurs.
+7. Exporte SRT/ASS/JSON sans réencoder, ou choisis Auto / Rapide / Qualité / Compact, vérifie l’encodeur résolu et la plage d’ETA, puis lance **Rendre la vidéo**.
 8. FFmpeg/libass écrit d'abord un staging `.partial`. `.partial` est strictement interne au média incomplet, jamais un format de sous-titres.
 9. Vidéo et sidecars sont publiés ensemble ; l'archive éventuelle de la source arrive en dernier. Les jobs existants peuvent être retranscrits ou rerendus depuis la file.
 
@@ -143,7 +144,7 @@ preset de la marque pour ce format
 résolution globale/par défaut
 ```
 
-Le format choisi par le Job reste l'autorité. Sélectionner un preset ne transforme pas silencieusement un Job 16:9 en 9:16.
+Appliquer explicitement un preset à un Job adopte son format, son mode d’adaptation, ses limites de segmentation et son style dans un snapshot complet. Les modifications explicites faites ensuite sur le Job restent possibles.
 
 ## 🔄 Dossiers surveillés
 
@@ -163,17 +164,24 @@ L'image runtime contient FFmpeg/libass. AutoSubs sonde filtres, hwaccels et enco
 
 Pour Intel/AMD Linux, expose `/dev/dri` et les groupes video/render nécessaires. Pour NVIDIA, utilise NVIDIA Container Toolkit. L'exemple Compose n'accorde aucun GPU par défaut.
 
-Le mode `auto` reste volontairement simple : si l'encodeur matériel choisi ne démarre pas, le rendu est retenté une fois en `libx264`.
+Le mode `auto` classe les encodeurs H.264 matériels validés par le benchmark runtime, tente les backends stables dans cet ordre puis retombe sur `libx264`. Les profils Rapide, Qualité et Compact appliquent leurs propres politiques sans masquer l’encodeur réellement utilisé.
+
+### Alignement mot-à-mot précis (optionnel)
+
+Les timestamps natifs Whisper/faster-whisper restent entièrement pris en charge. Pour le mot-à-mot le plus précis, active l’étape d’alignement dans **Settings** et renseigne un endpoint HTTP compatible. AutoSubs envoie le transcript accepté avec l’audio mono original, vérifie identité lexicale, nombre de mots et monotonie des bornes, puis conserve automatiquement les timings natifs si la réponse n’est pas valide.
+
+Un provider WhisperX CPU-only testé est fourni dans [`deploy/whisperx-aligner/`](deploy/whisperx-aligner/). Il reste optionnel et indépendant de la transcription : Speaches ou un autre ASR compatible OpenAI peut continuer à transcrire, WhisperX ne faisant que le forced alignment.
 
 ## ⚙️ Configuration
 
-> **Polices personnalisées :** `/fonts` est une frontière de confiance interne fixe. Monte n'importe quel dossier de polices de l'hôte vers `/fonts` (lecture seule possible) ; le chemin interne n'est volontairement plus configurable.
+> **Polices :** AutoSubs liste les polices système/fontconfig et les polices gérées par l’app. Le dossier applicatif vaut `/fonts` par défaut et se configure avec `AUTOSUBS_FONTS_DIR`. Monte-le en écriture pour permettre l’import depuis l’UI ; un montage en lecture seule reste possible si tu ne fais que consommer des polices préinstallées.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `AUTOSUBS_PORT` | `3000` | Port HTTP interne. |
 | `AUTOSUBS_CONFIG_DIR` | `/config` | Dossier local SQLite/config. |
 | `AUTOSUBS_DATA_DIR` | `/data` | Données uploads/jobs/renders. |
+| `AUTOSUBS_FONTS_DIR` | `/fonts` | Dossier des polices gérées par l’app ; écriture requise pour l’import UI. Les polices système restent détectées via fontconfig. |
 | `AUTOSUBS_ALLOWED_ROOTS` | `/data:/media` dans l'image | Racines visibles par le picker/workflows. Hors Docker, si la variable est absente, AutoSubs utilise son dossier data. |
 | `AUTOSUBS_MAX_RENDER_JOBS` | `2` | Encodages lourds simultanés. |
 | `AUTOSUBS_MAX_TRANSCRIPTION_JOBS` | `2` | Transcriptions simultanées. |

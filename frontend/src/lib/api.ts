@@ -1,5 +1,5 @@
 import { parseApiResponse } from './api-response.js';
-import type { Asset, Brand, BrowseResponse, Capabilities, FontFace, Job, JobOutro, Preset, SettingsView, SubtitleLine, Workflow, FormatProfile } from './types';
+import type { Asset, Brand, BrowseResponse, Capabilities, FontFace, Job, JobOutro, Preset, RenderOptions, RenderProfile, SettingsView, SubtitleLine, SubtitleWord, Workflow, FormatProfile } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -24,14 +24,16 @@ export const api = {
     method: 'POST', body: JSON.stringify({ path, sidecarPath: sidecarPath || undefined, presetId: presetId || undefined })
   }),
   prepare: (id: string) => request<{accepted:boolean}>(`/api/v1/jobs/${id}/prepare`, { method: 'POST' }),
+  renderOptions: (id: string) => request<RenderOptions>(`/api/v1/jobs/${id}/render-options`),
   render: (id: string) => request<{accepted:boolean}>(`/api/v1/jobs/${id}/render`, { method: 'POST' }),
   cancel: (id: string) => request<Job>(`/api/v1/jobs/${id}/cancel`, { method: 'POST' }),
   retranscribe: (id: string) => request<{accepted:boolean}>(`/api/v1/jobs/${id}/retranscribe`, { method: 'POST' }),
   deleteJob: (id: string) => request<void>(`/api/v1/jobs/${id}`, { method: 'DELETE' }),
-  updateJob: (id: string, body: { presetId?: string | null; format?: FormatProfile; outro?: JobOutro }) => request<Job>(`/api/v1/jobs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  updateJob: (id: string, body: { presetId?: string | null; format?: FormatProfile; outro?: JobOutro; renderProfile?: RenderProfile }) => request<Job>(`/api/v1/jobs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   subtitles: (id: string) => request<SubtitleLine[]>(`/api/v1/jobs/${id}/subtitles`),
   saveSubtitles: (id: string, lines: SubtitleLine[]) => request<{lines:SubtitleLine[]; repairedLineOverlaps:number; retimedWordLines:number; droppedEmptyLines:number}>(`/api/v1/jobs/${id}/subtitles`, { method: 'PUT', body: JSON.stringify(lines) }),
   regroup: (id: string, maxChars: number, maxLines: number) => request<SubtitleLine[]>(`/api/v1/jobs/${id}/regroup`, { method: 'POST', body: JSON.stringify({ maxChars, maxLines }) }),
+  applyPreset: (id: string, presetId: string) => request<Job>(`/api/v1/jobs/${id}/apply-preset`, { method: 'POST', body: JSON.stringify({ presetId }) }),
   setSidecar: (id: string, path: string) => request<Job>(`/api/v1/jobs/${id}/sidecar`, { method: 'PUT', body: JSON.stringify({ path }) }),
   removeSidecar: (id: string) => request<Job>(`/api/v1/jobs/${id}/sidecar`, { method: 'DELETE' }),
   uploadSidecar: async (id: string, file: File) => { const form = new FormData(); form.append('file', file); return request<Job>(`/api/v1/jobs/${id}/sidecar/upload`, { method: 'POST', body: form }); },
@@ -54,7 +56,22 @@ export const api = {
   browse: (path: string, mode: 'file'|'directory'|'any' = 'any', extensions = '') => request<BrowseResponse>(`/api/v1/browse?path=${encodeURIComponent(path)}&mode=${mode}&extensions=${encodeURIComponent(extensions)}`),
   favoriteFolder: (path:string, favorite:boolean) => request<string[]>('/api/v1/browse/favorites', { method:'PUT', body:JSON.stringify({ path, favorite }) }),
   capabilities: () => request<Capabilities>('/api/v1/capabilities'),
-  fonts: () => request<FontFace[]>('/api/v1/fonts')
+  fonts: () => request<FontFace[]>('/api/v1/fonts'),
+  uploadFont: async (file: File) => { const form = new FormData(); form.append('file', file); return request<FontFace>('/api/v1/fonts', { method:'POST', body:form }); },
+  previewFrame: async (body: { preset:Preset; text:string; words?:SubtitleWord[]; timestamp:number; jobId?:string }, signal?: AbortSignal) => {
+    const response = await fetch('/api/v1/preview/frame', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body),
+      signal
+    });
+    if (!response.ok) {
+      let message = `HTTP ${response.status}`;
+      try { const payload = await response.json(); message = payload?.error?.message ?? message; } catch { /* non-JSON */ }
+      throw new ApiError(response.status, message);
+    }
+    return response.blob();
+  }
 };
 
 export const subtitleExportUrl = (id:string, format:'srt'|'ass'|'json') => `/api/v1/jobs/${id}/subtitles/${format}`;

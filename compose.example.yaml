@@ -14,6 +14,7 @@ services:
 
       AUTOSUBS_CONFIG_DIR: /config
       AUTOSUBS_DATA_DIR: /data
+      AUTOSUBS_FONTS_DIR: /fonts
       AUTOSUBS_ALLOWED_ROOTS: /data:/media
 
       AUTOSUBS_MAX_RENDER_JOBS: "${AUTOSUBS_MAX_RENDER_JOBS:-2}"
@@ -34,7 +35,7 @@ services:
     volumes:
       - ./config:/config
       - ./data:/data
-      - ./fonts:/fonts:ro
+      - ./fonts:/fonts
       - "${MEDIA_PATH:-./media}:/media"
 
     read_only: true

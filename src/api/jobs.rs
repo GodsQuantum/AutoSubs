@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    domain::{FormatProfile, Job, JobOutro, SubtitleLine},
+    domain::{FormatProfile, Job, JobOutro, RenderProfile, SubtitleLine},
     error::{AppError, AppResult},
     format::normalize_format_profile,
     jobs,
@@ -36,15 +36,25 @@ pub async fn get_job(
         .map_err(|_| AppError::NotFound("job not found".into()))
 }
 
+fn deserialize_present_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobOptions {
-    #[serde(default)]
-    preset_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_option")]
+    preset_id: Option<Option<String>>,
     #[serde(default)]
     format: Option<FormatProfile>,
     #[serde(default)]
     outro: Option<JobOutro>,
+    #[serde(default)]
+    render_profile: Option<RenderProfile>,
 }
 pub async fn update_job_options(
     State(state): State<AppState>,
@@ -58,8 +68,13 @@ pub async fn update_job_options(
             "cannot change job options while it is active".into(),
         ));
     }
-    if let Some(preset_id) = body.preset_id.as_deref()
-        && !state.presets.read().await.iter().any(|p| p.id == preset_id)
+    if let Some(Some(preset_id)) = body.preset_id.as_ref()
+        && !state
+            .presets
+            .read()
+            .await
+            .iter()
+            .any(|p| p.id == *preset_id)
     {
         return Err(AppError::BadRequest("unknown presetId".into()));
     }
@@ -76,16 +91,29 @@ pub async fn update_job_options(
     let preset_id = body.preset_id;
     let mut format = body.format;
     let outro = body.outro;
+    let render_profile = body.render_profile;
     if let Some(profile) = format.as_mut() {
         normalize_format_profile(profile).map_err(AppError::BadRequest)?;
     }
     jobs::update_job(&state, &id, move |job| {
-        job.preset_id = preset_id;
+        if let Some(next_preset_id) = preset_id {
+            if job.preset_id != next_preset_id {
+                job.effective_preset = None;
+                job.resolved_brand_id = None;
+            }
+            job.preset_id = next_preset_id;
+        }
         if let Some(format) = format {
-            job.format = format;
+            job.format = format.clone();
+            if let Some(preset) = job.effective_preset.as_mut() {
+                preset.format = format;
+            }
         }
         if let Some(outro) = outro {
             job.outro = outro;
+        }
+        if let Some(render_profile) = render_profile {
+            job.render_profile = render_profile;
         }
     })
     .map(Json)
@@ -162,6 +190,16 @@ pub async fn prepare(
     jobs::enqueue_prepare(state, id).map_err(|e| AppError::Conflict(e.to_string()))?;
     Ok(Json(json!({"accepted":true})))
 }
+pub async fn render_options(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<Json<crate::render_history::RenderOptions>> {
+    jobs::render_options(&state, &id)
+        .await
+        .map(Json)
+        .map_err(|error| AppError::Conflict(error.to_string()))
+}
+
 pub async fn render(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -224,6 +262,23 @@ pub async fn regroup(
     jobs::regroup_subtitles(&state, &id, body.max_chars, body.max_lines)
         .map(Json)
         .map_err(|e| AppError::Conflict(e.to_string()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyPreset {
+    preset_id: String,
+}
+
+pub async fn apply_preset(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<ApplyPreset>,
+) -> AppResult<Json<Job>> {
+    jobs::apply_preset_to_job(&state, &id, &body.preset_id)
+        .await
+        .map(Json)
+        .map_err(|error| AppError::Conflict(error.to_string()))
 }
 
 #[derive(Deserialize)]
@@ -323,10 +378,20 @@ pub async fn export_subtitles(
         ),
         "json" => ("application/json", serde_json::to_vec_pretty(&lines)?),
         "ass" => {
-            let mut preset =
-                jobs::resolve_preset(&state, &job.original_name, None, job.preset_id.as_deref())
-                    .await;
-            preset.format = job.format.clone();
+            let preset = match job.effective_preset.clone() {
+                Some(preset) => preset,
+                None => {
+                    jobs::resolve_effective_preset(
+                        &state,
+                        &job.original_name,
+                        None,
+                        job.preset_id.as_deref(),
+                    )
+                    .await
+                    .map_err(|error| AppError::Conflict(error.to_string()))?
+                    .preset
+                }
+            };
             let source_resolution = if let Some(input) = job.input_path.as_ref() {
                 let token = CancellationToken::new();
                 let probe = probe_media(input, &token)
@@ -432,6 +497,18 @@ fn encode_header_parameter(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn job_options_distinguish_missing_preset_from_explicit_null() {
+        let missing: JobOptions =
+            serde_json::from_str(r#"{"format":{"key":"source","fit":"preserve"}}"#).unwrap();
+        let clear: JobOptions = serde_json::from_str(r#"{"presetId":null}"#).unwrap();
+        let selected: JobOptions = serde_json::from_str(r#"{"presetId":"preset-1"}"#).unwrap();
+
+        assert_eq!(missing.preset_id, None);
+        assert_eq!(clear.preset_id, Some(None));
+        assert_eq!(selected.preset_id, Some(Some("preset-1".into())));
+    }
 
     #[test]
     fn export_filename_header_supports_unicode() {

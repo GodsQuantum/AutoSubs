@@ -44,7 +44,7 @@
 - [ ] Run frontend tests/check/build and Rust API tests.
 
 ### Task 4: Runtime/storage/dependency polish
-- [ ] Map Cloud9 production/cloud/media/download libraries into AutoSubs with source libraries read-only.
+- [ ] Map deployment media libraries into AutoSubs with source libraries read-only.
 - [ ] Update version/toolchain/dependencies only where verified.
 - [ ] Remove proven-unused direct dependencies.
 - [ ] Update README/CHANGELOG/handoff.

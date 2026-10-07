@@ -25,6 +25,7 @@ pub struct AppState {
     pub events: broadcast::Sender<JobEvent>,
     pub http: reqwest::Client,
     pub render_slots: Arc<Semaphore>,
+    pub preview_slots: Arc<Semaphore>,
     pub transcription_slots: Arc<Semaphore>,
     pub active_job_slots: Arc<Semaphore>,
     pub encoders: Arc<RwLock<EncoderCapabilities>>,
@@ -99,6 +100,7 @@ impl AppState {
             events,
             http,
             render_slots: Arc::new(Semaphore::new(render)),
+            preview_slots: Arc::new(Semaphore::new(2)),
             transcription_slots: Arc::new(Semaphore::new(transcribe)),
             active_job_slots: Arc::new(Semaphore::new(active)),
             encoders: Arc::new(RwLock::new(EncoderCapabilities::default())),
@@ -163,6 +165,8 @@ fn migrate_legacy_brands(
                     assets: Default::default(),
                     preset_ids: Vec::new(),
                     default_preset_by_format: BTreeMap::new(),
+                    match_keywords: None,
+                    highlight_color: None,
                 };
                 db.upsert("brand", &id, &brand)?;
                 brands.push(brand);
