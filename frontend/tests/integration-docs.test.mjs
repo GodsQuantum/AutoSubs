@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const root = new URL('../../', import.meta.url);
 
-test('v3.5.0 integration docs expose the shipped version, AppImage and lifecycle API', async () => {
+test('v3.5.1 integration docs expose the shipped version, AppImage and lifecycle API', async () => {
   const [cargo, frontend, lock, changelog, readme] = await Promise.all([
     readFile(new URL('Cargo.toml', root), 'utf8'),
     readFile(new URL('frontend/package.json', root), 'utf8'),
@@ -13,9 +13,9 @@ test('v3.5.0 integration docs expose the shipped version, AppImage and lifecycle
     readFile(new URL('README.md', root), 'utf8')
   ]);
 
-  assert.match(cargo, /version = "3\.5\.0"/);
-  assert.match(frontend, /"version": "3\.5\.0"/);
-  assert.match(lock, /"version": "3\.5\.0"/g);
+  assert.match(cargo, /version = "3\.5\.1"/);
+  assert.match(frontend, /"version": "3\.5\.1"/);
+  assert.match(lock, /"version": "3\.5\.1"/g);
   for (const topic of [
     'AppImage',
     '--background',
@@ -61,7 +61,9 @@ test('native AppImage workflow builds and attaches both Linux architectures', as
 
   assert.match(release, /uses:\s+\.\/\.github\/workflows\/appimage\.yml/);
   assert.match(release, /actions\/download-artifact/);
+  assert.match(release, /gh release create[\s\S]*--draft/);
   assert.match(release, /gh release upload/);
+  assert.match(release, /gh release edit[\s\S]*--draft=false[\s\S]*--latest/);
   assert.match(release, /\.AppImage/);
   assert.match(release, /\.sha256/);
   assert.doesNotMatch(release, /TAG_SHA=.*gh api.*\|\| true/);
