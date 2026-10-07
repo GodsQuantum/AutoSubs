@@ -56,6 +56,10 @@ pub fn scale_ass_metric(value: f64, play_res_y: u32) -> f64 {
     value.max(0.0) * play_res_y as f64 / PRESET_REFERENCE_HEIGHT
 }
 
+fn scale_ass_signed_metric(value: f64, play_res_y: u32) -> f64 {
+    value * play_res_y as f64 / PRESET_REFERENCE_HEIGHT
+}
+
 fn float_tags(duration_ms: i64, speed: f64) -> String {
     if duration_ms <= 0 || speed <= 0.0 {
         return String::new();
@@ -86,6 +90,45 @@ fn is_closing_punctuation_token(value: &str) -> bool {
         })
 }
 
+fn timing_token_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .map(|ch| match ch {
+            '’' | '‘' => '\'',
+            '‐' | '‑' | '–' | '—' => '-',
+            other => other,
+        })
+        .collect()
+}
+
+fn matched_source_span(
+    source_words: &[SubtitleWord],
+    source_index: &mut usize,
+    token: &str,
+) -> Option<(f64, f64)> {
+    let target = timing_token_key(token);
+    if target.is_empty() || *source_index >= source_words.len() {
+        return None;
+    }
+
+    let start_index = *source_index;
+    let mut combined = String::new();
+    for end_index in start_index..source_words.len().min(start_index + 8) {
+        combined.push_str(&timing_token_key(&source_words[end_index].word));
+        if combined == target {
+            *source_index = end_index + 1;
+            return Some((source_words[start_index].start, source_words[end_index].end));
+        }
+        if combined.chars().count() > target.chars().count() {
+            break;
+        }
+    }
+
+    None
+}
+
 fn word_by_word_units(line: &SubtitleLine) -> Vec<SubtitleWord> {
     let tokens: Vec<&str> = line.text.split_whitespace().collect();
     if tokens.is_empty() {
@@ -95,11 +138,16 @@ fn word_by_word_units(line: &SubtitleLine) -> Vec<SubtitleWord> {
     let source_words = line.words.as_deref().unwrap_or(&[]);
     let fallback_duration = ((line.end - line.start).max(0.001)) / tokens.len() as f64;
     let mut units: Vec<SubtitleWord> = Vec::with_capacity(tokens.len());
+    let mut source_index = 0usize;
 
     for (index, token) in tokens.into_iter().enumerate() {
-        let (start, end) = source_words
-            .get(index)
-            .map(|word| (word.start, word.end))
+        let (start, end) = matched_source_span(source_words, &mut source_index, token)
+            .or_else(|| {
+                source_words.get(source_index).map(|word| {
+                    source_index += 1;
+                    (word.start, word.end)
+                })
+            })
             .unwrap_or_else(|| {
                 let start = line.start + fallback_duration * index as f64;
                 (start, (start + fallback_duration).min(line.end))
@@ -145,12 +193,28 @@ pub fn generate_ass_content(
     let primary = to_ass_color(&preset.base_color, 0);
     let outline = to_ass_color(&preset.outline_color, 0);
     let highlight = to_ass_color(&preset.highlight_color, 0);
-    let shadow = to_ass_color(preset.shadow_color.as_deref().unwrap_or("#000000"), 0);
+    let shadow_opacity = preset.shadow_opacity.unwrap_or(100).min(100);
+    let shadow = to_ass_color(
+        preset.shadow_color.as_deref().unwrap_or("#000000"),
+        100 - shadow_opacity,
+    );
     let bold = if preset.bold { -1 } else { 0 };
     let italic = if preset.italic { -1 } else { 0 };
     let size = scale_ass_metric(preset.size, play_y);
     let outline_size = scale_ass_metric(preset.outline_thickness, play_y);
-    let shadow_size = scale_ass_metric(preset.shadow_thickness.unwrap_or(0.0), play_y);
+    let legacy_shadow = preset.shadow_thickness.unwrap_or(0.0);
+    let shadow_x = scale_ass_signed_metric(preset.shadow_offset_x.unwrap_or(legacy_shadow), play_y);
+    let shadow_y = scale_ass_signed_metric(preset.shadow_offset_y.unwrap_or(legacy_shadow), play_y);
+    let shadow_blur = scale_ass_metric(preset.shadow_blur.unwrap_or(0.0), play_y);
+    let shadow_tags = if shadow_opacity == 0
+        || (shadow_x.abs() < f64::EPSILON
+            && shadow_y.abs() < f64::EPSILON
+            && shadow_blur.abs() < f64::EPSILON)
+    {
+        String::new()
+    } else {
+        format!("{{\\xshad{shadow_x:.2}\\yshad{shadow_y:.2}\\blur{shadow_blur:.2}}}")
+    };
     let line_spacing = scale_ass_metric(preset.line_spacing, play_y);
 
     let mut out = format!(
@@ -163,7 +227,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},{primary},{highlight},{outline},{shadow},{bold},{italic},0,0,100,100,0,0,{border},{outline_size},{shadow_size},5,0,0,0,1
+Style: Default,{font},{size},{primary},{highlight},{outline},{shadow},{bold},{italic},0,0,100,100,0,0,{border},{outline_size},0,5,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -248,7 +312,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         String::new()
                     };
                     let rendered = format!(
-                        "{{\\q2\\pos({x},{y})}}{float}{}",
+                        "{{\\q2\\pos({x},{y})}}{shadow_tags}{float}{}",
                         safe_text(&unit.word, preset.uppercase)
                     );
                     out.push_str(&format!(
@@ -281,7 +345,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     } else {
                         String::new()
                     };
-                    let mut rendered = format!("{{\\q2\\pos({x},{y})}}{float}");
+                    let mut rendered = format!("{{\\q2\\pos({x},{y})}}{shadow_tags}{float}");
                     let mut global_index = 0usize;
                     for (visual_index, visual) in visual_lines.iter().enumerate() {
                         if visual_index > 0 {
@@ -338,7 +402,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     ),
                     _ => (format!("{{\\q2\\pos({x},{curr_y})}}"), String::new()),
                 };
-                let mut rendered = format!("{position}{float}{animation}");
+                let mut rendered = format!("{position}{shadow_tags}{float}{animation}");
                 let mut global_word = 0usize;
                 for (line_index, visual) in visual_lines.iter().enumerate() {
                     if line_index > 0 {
@@ -391,6 +455,48 @@ mod tests {
     }
 
     #[test]
+    fn word_by_word_units_map_joined_display_tokens_to_their_full_canonical_timing_span() {
+        let line = SubtitleLine {
+            id: 0,
+            start: 0.0,
+            end: 1.4,
+            text: "quand-même voilà".into(),
+            words: Some(vec![
+                SubtitleWord {
+                    word: "quand".into(),
+                    start: 0.0,
+                    end: 0.4,
+                },
+                SubtitleWord {
+                    word: "-".into(),
+                    start: 0.4,
+                    end: 0.45,
+                },
+                SubtitleWord {
+                    word: "même".into(),
+                    start: 0.45,
+                    end: 0.9,
+                },
+                SubtitleWord {
+                    word: "voilà".into(),
+                    start: 1.0,
+                    end: 1.4,
+                },
+            ]),
+        };
+
+        let units = word_by_word_units(&line);
+
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[0].word, "quand-même");
+        assert!((units[0].start - 0.0).abs() < 1e-9);
+        assert!((units[0].end - 0.9).abs() < 1e-9);
+        assert_eq!(units[1].word, "voilà");
+        assert!((units[1].start - 1.0).abs() < 1e-9);
+        assert!((units[1].end - 1.4).abs() < 1e-9);
+    }
+
+    #[test]
     fn source_profile_uses_probed_resolution() {
         let preset = Preset {
             format: FormatProfile {
@@ -434,7 +540,23 @@ mod tests {
         let uhd = generate_ass_content(&[sample_line()], &preset, Some((3840, 2160)));
         assert!(hd.contains(",54,"), "{hd}");
         assert!(uhd.contains(",108,"), "{uhd}");
-        assert!(uhd.contains(",6,3,"), "{uhd}");
+        assert!(uhd.contains(",6,0,"), "{uhd}");
+        assert!(uhd.contains("\\xshad3.00\\yshad3.00"), "{uhd}");
+    }
+
+    #[test]
+    fn explicit_shadow_controls_emit_native_libass_tags_and_alpha() {
+        let preset = Preset {
+            shadow_offset_x: Some(-2.0),
+            shadow_offset_y: Some(4.0),
+            shadow_blur: Some(1.5),
+            shadow_opacity: Some(50),
+            shadow_color: Some("#112233".into()),
+            ..Preset::default()
+        };
+        let ass = generate_ass_content(&[sample_line()], &preset, Some((1920, 1080)));
+        assert!(ass.contains("\\xshad-2.00\\yshad4.00\\blur1.50"), "{ass}");
+        assert!(ass.contains("&H80332211&"), "{ass}");
     }
 
     #[test]

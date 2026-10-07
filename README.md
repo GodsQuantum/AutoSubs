@@ -44,6 +44,7 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 - **Server-side picker + favorites** — use files already mounted into the container instead of uploading them again; favorite frequently used folders once and reopen them from a compact shortcut list.
 - **Sidecar-first workflow** — import `.ass`, `.ssa`, `.srt` or AutoSubs JSON; attach, replace or detach a sidecar before rendering.
 - **Transcription providers** — OpenAI-compatible transcription endpoints plus an optional local provider/fallback such as Speaches.
+- **Optional forced alignment** — keep transcription and timing refinement separate: AutoSubs can validate word boundaries returned by a WhisperX-compatible HTTP aligner and safely fall back to native timestamps when alignment is unavailable or invalid.
 - **Optional LLM correction** — spelling/punctuation correction after import/transcription while preserving line count and timings.
 - **Canonical subtitle timing engine** — one Rust implementation repairs invalid ranges, overlaps, gaps and word timings. The browser does not maintain a competing copy.
 - **Unicode-aware line grouping** — grapheme counting, Unicode line-break opportunities and French no-break rules instead of UTF-8 byte counting.
@@ -89,7 +90,7 @@ A typical layout is:
 ```text
 /config             local SSD / host filesystem — SQLite only
 /data               local or fast app working data — uploads/jobs/renders
-/fonts              custom fonts, read-only is fine
+/fonts              app-managed/custom fonts — writable when UI font import is enabled
 /srv/media/...        large source/output/archive trees
 ```
 
@@ -119,7 +120,7 @@ services:
     volumes:
       - ./config:/config
       - ./data:/data
-      - ./fonts:/fonts:ro
+      - ./fonts:/fonts
       - /srv/media:/srv/media
 ```
 
@@ -136,8 +137,8 @@ For migration, the old `SPEACHES_URL` variable is still accepted as a first-boot
 3. Optional LLM correction runs on text only.
 4. The canonical Rust engine normalizes timings and grouping.
 5. The job reaches **Ready**. Nothing has been re-encoded yet unless you explicitly chose immediate render.
-6. Review/edit/split/merge/delete/search/replace/regroup/shift timings in Editor. Use **Remove final periods** for short-form caption cleanup; it preserves commas, !, ?, and ellipses and can be undone before saving. The canonical word timeline remains available for later regrouping.
-7. Export SRT/ASS/JSON without touching the video, or click **Render video**.
+6. Review/edit/split/merge/delete/search/replace/regroup/shift timings in Editor. You can insert explicit visual line breaks without retiming words and nudge individual word boundaries by 10 ms within adjacent-word constraints. Use **Remove final periods** for short-form caption cleanup; it preserves commas, !, ?, and ellipses and can be undone before saving. The canonical word timeline remains available for later regrouping.
+7. Export SRT/ASS/JSON without touching the video, or choose Auto / Fast / Quality / Compact, inspect the resolved encoder + ETA range, then click **Render video**.
 8. FFmpeg/libass renders to a `.partial` staging file. `.partial` is internal media staging and is never treated as a subtitle file.
 9. Video and sidecars publish together; an optional source archive happens last. Existing jobs can be retranscribed or re-rendered from the queue.
 
@@ -183,17 +184,24 @@ For Intel/AMD Linux acceleration, expose `/dev/dri` to the container and add the
 
 `auto` ranks validated H.264 hardware backends by measured runtime. Differences within 5% are treated as benchmark noise and resolved with a stability-first preference (NVENC, QSV, VA-API, Vulkan, AMF); outside that margin the genuinely faster backend wins. `h264_vulkan` is therefore selected when it survives the sustained 2160×3840 stress benchmark and is meaningfully faster on that machine. If a backend later fails on a real file, AutoSubs tries the next validated hardware backend before falling back to `libx264`. Explicit encoder selections remain explicit. For 4K software rendering, avoid hard 1 GiB container limits: HEVC decode + libass + libx264 can transiently exceed that.
 
+### Optional precision word alignment
+
+Native Whisper/faster-whisper word timestamps remain fully supported. For stricter word-by-word timing, enable the alignment stage in **Settings** and provide a compatible HTTP endpoint. AutoSubs sends the accepted transcript plus the original mono audio, validates returned lexical identity/count and monotonic boundaries, and uses native timings automatically if the provider fails validation.
+
+A tested CPU-only WhisperX reference provider lives in [`deploy/whisperx-aligner/`](deploy/whisperx-aligner/). It is optional and deliberately separate from transcription: you can keep Speaches or another OpenAI-compatible ASR provider and use WhisperX only for forced alignment.
+
 ## ⚙️ Configuration
 
 Core runtime variables:
 
-> **Custom fonts:** `/fonts` is a fixed internal trust boundary. Mount any host font directory to `/fonts` (read-only is fine); the internal font path is intentionally not configurable at runtime.
+> **Fonts:** AutoSubs lists both system/fontconfig faces and app-managed fonts. The app font directory defaults to `/fonts` and is configurable with `AUTOSUBS_FONTS_DIR`. Mount it writable if you want UI font imports; a read-only mount is still valid when you only consume pre-provisioned fonts.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `AUTOSUBS_PORT` | `3000` | HTTP port inside the container. |
 | `AUTOSUBS_CONFIG_DIR` | `/config` | Local SQLite/config directory. |
 | `AUTOSUBS_DATA_DIR` | `/data` | Upload/job/render working data. |
+| `AUTOSUBS_FONTS_DIR` | `/fonts` | App-managed font directory; writable for UI font imports. System fonts remain discoverable through fontconfig. |
 | `AUTOSUBS_ALLOWED_ROOTS` | `/data:/media` in the image | Colon-separated roots exposed by the server picker/workflows. If omitted outside Docker, AutoSubs falls back to its data directory. |
 | `AUTOSUBS_MAX_RENDER_JOBS` | `2` | Concurrent expensive render slots. |
 | `AUTOSUBS_MAX_TRANSCRIPTION_JOBS` | `2` | Concurrent transcription slots. |
@@ -225,6 +233,7 @@ The current API is versioned under `/api/v1`:
 ```text
 GET          /api/v1/health
 GET          /api/v1/capabilities
+POST         /api/v1/preview/frame                  Authoritative FFmpeg/libass preview frame
 GET          /api/v1/events                         SSE
 
 GET          /api/v1/jobs
@@ -235,6 +244,7 @@ GET/HEAD     /api/v1/jobs/{id}/video/source          Original source only
 GET/HEAD     /api/v1/jobs/{id}/video/output          Rendered output only
 POST         /api/v1/jobs/{id}/cancel
 POST         /api/v1/jobs/{id}/prepare
+GET          /api/v1/jobs/{id}/render-options       Profiles, resolved encoder and ETA
 POST         /api/v1/jobs/{id}/render
 POST         /api/v1/jobs/{id}/retranscribe
 PUT/DELETE   /api/v1/jobs/{id}/sidecar
@@ -243,7 +253,7 @@ GET/PUT      /api/v1/jobs/{id}/subtitles
 POST         /api/v1/jobs/{id}/regroup
 GET          /api/v1/jobs/{id}/subtitles/{srt|ass|json}
 
-GET          /api/v1/fonts                          Detected custom font catalog
+GET/POST     /api/v1/fonts                          System + app font catalog / app font import
 GET          /api/v1/fonts/css                      Browser @font-face stylesheet
 GET          /api/v1/fonts/{id}/content             Safe font content endpoint
 

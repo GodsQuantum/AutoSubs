@@ -13,7 +13,7 @@ pub struct Config {
     pub config_dir: PathBuf,
     #[arg(long, env = "AUTOSUBS_DATA_DIR", default_value = "/data")]
     pub data_dir: PathBuf,
-    #[arg(skip = PathBuf::from("/fonts"))]
+    #[arg(long, env = "AUTOSUBS_FONTS_DIR", default_value = "/fonts")]
     pub fonts_dir: PathBuf,
     #[arg(long, env = "AUTOSUBS_DIST_DIR", default_value = "/app/frontend")]
     pub dist_dir: PathBuf,
@@ -50,7 +50,7 @@ impl Config {
         {
             self.max_render_jobs = parsed;
         }
-        for path in [&self.config_dir, &self.data_dir] {
+        for path in [&self.config_dir, &self.data_dir, &self.fonts_dir] {
             std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
         }
 
@@ -58,6 +58,8 @@ impl Config {
             .with_context(|| format!("canonicalize {}", self.config_dir.display()))?;
         self.data_dir = std::fs::canonicalize(&self.data_dir)
             .with_context(|| format!("canonicalize {}", self.data_dir.display()))?;
+        self.fonts_dir = std::fs::canonicalize(&self.fonts_dir)
+            .with_context(|| format!("canonicalize {}", self.fonts_dir.display()))?;
 
         for path in [
             self.uploads_dir(),
@@ -235,18 +237,17 @@ pub fn ensure_sqlite_local(config_dir: &Path) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn fonts_dir_is_fixed_internal_mount() {
+    fn fonts_dir_defaults_to_docker_mount_but_is_portable_and_configurable() {
         let config = <Config as clap::Parser>::try_parse_from(["autosubs"]).unwrap();
         assert_eq!(config.fonts_dir, PathBuf::from("/fonts"));
 
-        assert!(
-            <Config as clap::Parser>::try_parse_from([
-                "autosubs",
-                "--fonts-dir",
-                "/tmp/untrusted-fonts",
-            ])
-            .is_err()
-        );
+        let portable = <Config as clap::Parser>::try_parse_from([
+            "autosubs",
+            "--fonts-dir",
+            "/tmp/autosubs-fonts",
+        ])
+        .unwrap();
+        assert_eq!(portable.fonts_dir, PathBuf::from("/tmp/autosubs-fonts"));
     }
 
     #[test]

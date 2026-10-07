@@ -120,7 +120,18 @@ test('preview exposes every animation family and timed-word inputs', async () =>
   assert.doesNotMatch(source, /p\.fontFamily\},sans-serif/);
 });
 
-test('applying a selected preset enforces its segmentation on the job', async () => {  const source = await (await import('node:fs/promises')).readFile(    new URL('../src/lib/views/EditorView.svelte', import.meta.url), 'utf8'  );  assert.match(source, /on:change={applyPresetDefaults}/);  assert.ok(source.includes('if(selectedPreset&&lines.length)lines=await api.regroup(job.id,maxChars,maxLines)')); });
+test('applying a selected preset uses the atomic backend preset operation', async () => {
+  const source = await (await import('node:fs/promises')).readFile(
+    new URL('../src/lib/views/EditorView.svelte', import.meta.url), 'utf8'
+  );
+  const api = await (await import('node:fs/promises')).readFile(
+    new URL('../src/lib/api.ts', import.meta.url), 'utf8'
+  );
+  assert.match(source, /on:change={applyPresetDefaults}/);
+  assert.match(source, /api\.applyPreset\(job\.id,selectedPreset\)/);
+  assert.doesNotMatch(source, /selectedPreset&&lines\.length\)lines=await api\.regroup/);
+  assert.match(api, /applyPreset:.*\/apply-preset/);
+});
 test('demo preview time loops without losing pause continuity', () => {
   assert.equal(loopedPreviewTime(0, 3), 0);
   assert.equal(loopedPreviewTime(3.25, 3), 0.25);
@@ -165,6 +176,42 @@ test('subtitle download keeps the server filename and surfaces API errors', asyn
     ),
     /export unavailable/
   );
+});
+
+test('preset editor uses paired numeric sliders and authoritative libass preview', async () => {
+  const fs = await import('node:fs/promises');
+  const presetView = await fs.readFile(new URL('../src/lib/views/PresetsView.svelte', import.meta.url), 'utf8');
+  const preview = await fs.readFile(new URL('../src/lib/components/FormatPreview.svelte', import.meta.url), 'utf8');
+  const api = await fs.readFile(new URL('../src/lib/api.ts', import.meta.url), 'utf8');
+
+  assert.match(presetView, /NumberSlider/);
+  assert.match(presetView, /shadowOffsetX/);
+  assert.match(presetView, /shadowOffsetY/);
+  assert.match(presetView, /shadowBlur/);
+  assert.match(presetView, /shadowOpacity/);
+  assert.match(presetView, /uploadFont/);
+  assert.match(preview, /authoritativePreviewUrl/);
+  assert.match(preview, /AbortController/);
+  assert.match(api, /previewFrame:/);
+  assert.match(api, /uploadFont:/);
+});
+
+test('editor exposes resolved render profile ETA and timing-safe editing controls', async () => {
+  const fs = await import('node:fs/promises');
+  const editor = await fs.readFile(new URL('../src/lib/views/EditorView.svelte', import.meta.url), 'utf8');
+  const api = await fs.readFile(new URL('../src/lib/api.ts', import.meta.url), 'utf8');
+  const types = await fs.readFile(new URL('../src/lib/types.ts', import.meta.url), 'utf8');
+
+  assert.match(editor, /renderProfile/);
+  assert.match(editor, /renderOptions/);
+  assert.match(editor, /estimatedTime/);
+  assert.match(editor, /actualEncoder/);
+  assert.match(editor, /insertSubtitleLineBreak/);
+  assert.match(editor, /nudgeSubtitleWordBoundary/);
+  assert.match(editor, /timingQualityLabel/);
+  assert.match(api, /renderOptions:/);
+  assert.match(api, /renderProfile\?: RenderProfile/);
+  assert.match(types, /RenderProfile = 'auto'\|'fast'\|'quality'\|'compact'/);
 });
 
 test('word-by-word preview groups apostrophe and hyphen continuations', async () => {
