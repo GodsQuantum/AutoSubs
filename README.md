@@ -81,6 +81,27 @@ docker compose -f compose.example.yaml up -d
 
 Open `http://<server-ip>:3051`.
 
+### Native Linux AppImage
+
+Docker remains the recommended server/NAS deployment, but AutoSubs is also released as a native Linux **AppImage** for x86_64 and aarch64. Download the matching `AutoSubs-<version>-<arch>.AppImage` asset from the GitHub Release, verify its adjacent `.sha256` file, then:
+
+```bash
+chmod +x AutoSubs-*.AppImage
+./AutoSubs-*.AppImage
+```
+
+The AppImage starts the same Rust backend and Svelte UI on `http://127.0.0.1:3051`, then opens your default browser. It does not install anything as root. Mutable state uses XDG user locations:
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/autosubs        SQLite/config
+${XDG_DATA_HOME:-$HOME/.local/share}/autosubs     data + custom fonts
+${XDG_STATE_HOME:-$HOME/.local/state}/autosubs    graphical-launch logs
+```
+
+Use `./AutoSubs-*.AppImage --background` (or `--no-browser`) when you want the backend and enabled **folder workflows** to keep running without opening a browser. Closing the browser never stops workflows; stopping the AppImage process does.
+
+The AppImage carries a known-good FFmpeg/libass + fontconfig command-line baseline. By default those bundled media tools are preferred for reproducibility. Set `AUTOSUBS_USE_SYSTEM_MEDIA_TOOLS=1` before launch to prefer your distro tools instead, useful when a rolling distro exposes newer GPU encoders or drivers. Existing `AUTOSUBS_*` variables still override AppImage defaults; `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` control its normal per-user storage locations.
+
 ### Storage rule that matters
 
 `/config` contains `autosubs.db` and **must be local storage**. AutoSubs uses SQLite WAL and refuses known network filesystems such as NFS/CIFS/SSHFS for the database path. Your videos, watch folders and outputs can absolutely live on NFS; mount them separately under an allowed media root.

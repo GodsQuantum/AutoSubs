@@ -4,6 +4,20 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-10-07
+
+### Added
+
+- Native x86_64 and aarch64 Linux AppImages built from the same Rust backend, Svelte frontend and workflow supervisor as the Docker distribution.
+- XDG-aware AppImage launcher with loopback-only defaults, browser-ready health waiting, duplicate-instance reuse, background/no-browser mode and graphical-launch logs.
+- Digest-pinned `linuxdeploy`/`appimagetool` packaging with a bundled FFmpeg/libass, fontconfig and curl baseline plus `AUTOSUBS_USE_SYSTEM_MEDIA_TOOLS=1` for host-tool preference.
+- Native GitHub Actions packaging and release assets with architecture-specific AppImages and SHA-256 checksum files.
+
+### Changed
+
+- GitHub release automation now validates and attaches native Linux artifacts alongside the existing multi-architecture container release.
+- AppImage runtime state is kept outside the immutable bundle under standard XDG config/data/state locations.
+
 ## [3.4.0] - 2026-10-07
 
 ### Added

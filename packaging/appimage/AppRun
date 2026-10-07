@@ -7,6 +7,16 @@ if [ -z "${APPDIR:-}" ]; then
 fi
 
 OPEN_BROWSER="${AUTOSUBS_APPIMAGE_OPEN_BROWSER:-1}"
+CLI_STDIO=0
+for arg in "$@"; do
+  case "$arg" in
+    --version|-V|--help|-h) CLI_STDIO=1 ;;
+  esac
+done
+if [ "$CLI_STDIO" = "1" ]; then
+  OPEN_BROWSER=0
+fi
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --background|--no-browser)
@@ -36,6 +46,11 @@ AUTOSUBS_DIST_DIR="${AUTOSUBS_DIST_DIR:-$APPDIR/usr/share/autosubs/frontend}"
 AUTOSUBS_HOST="${AUTOSUBS_HOST:-127.0.0.1}"
 AUTOSUBS_PORT="${AUTOSUBS_PORT:-3051}"
 
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "$APPDIR/usr/share/autosubs/ca-certificates.crt" ]; then
+  SSL_CERT_FILE="$APPDIR/usr/share/autosubs/ca-certificates.crt"
+  export SSL_CERT_FILE
+fi
+
 mkdir -p -- "$AUTOSUBS_CONFIG_DIR" "$AUTOSUBS_DATA_DIR" "$AUTOSUBS_FONTS_DIR" "$AUTOSUBS_APPIMAGE_STATE_DIR"
 
 if [ -z "${AUTOSUBS_ALLOWED_ROOTS:-}" ]; then
@@ -61,6 +76,12 @@ else
   PATH="$APPDIR/usr/bin:$ORIGINAL_PATH"
 fi
 export PATH
+
+# Informational CLI commands must always reach the packaged backend, even when
+# another AutoSubs instance is already healthy on the selected port.
+if [ "$CLI_STDIO" = "1" ]; then
+  exec "$APPDIR/usr/bin/autosubs" "$@"
+fi
 
 BROWSER_HOST="$AUTOSUBS_HOST"
 case "$BROWSER_HOST" in
@@ -106,7 +127,7 @@ if [ "$OPEN_BROWSER" != "0" ]; then
   ) &
 fi
 
-if [ "${AUTOSUBS_APPIMAGE_FORCE_STDIO:-0}" = "1" ] || [ -t 1 ]; then
+if [ "${AUTOSUBS_APPIMAGE_FORCE_STDIO:-0}" = "1" ] || [ "$CLI_STDIO" = "1" ] || [ -t 1 ]; then
   exec "$APPDIR/usr/bin/autosubs" "$@"
 fi
 

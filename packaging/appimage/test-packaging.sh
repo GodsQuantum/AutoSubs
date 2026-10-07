@@ -17,6 +17,8 @@ grep -F "8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1" "$FET
 grep -F "5c1fddf96066891e829831cac0d84424690f3b22846c7f8f1bb9990a5c6c73f4" "$FETCH" >/dev/null
 grep -F "95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6" "$FETCH" >/dev/null
 grep -F "a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270" "$FETCH" >/dev/null
+grep -F "156f4bdbde9c52d01814600013e0a273f0118dc2de98975f3c8c63427ec79074" "$FETCH" >/dev/null
+grep -F "b4ff0030242d0c3bb12ce40541828303cf167493f4793456f0436edd6255c39d" "$FETCH" >/dev/null
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -30,6 +32,10 @@ fi
 
 mkdir -p "$TMP/frontend" "$TMP/runtime" "$TMP/bin"
 printf '<!doctype html><title>AutoSubs package test</title>\n' > "$TMP/frontend/index.html"
+printf '%s\n' '-----BEGIN CERTIFICATE-----' 'fixture' '-----END CERTIFICATE-----' > "$TMP/runtime/ca-certificates.crt"
+printf 'fake jack\n' > "$TMP/runtime/libjack.so.0"
+printf 'fake runtime\n' > "$TMP/runtime/runtime-x86_64"
+printf 'fake runtime\n' > "$TMP/runtime/runtime-aarch64"
 
 cat > "$TMP/autosubs" <<'EOF'
 #!/bin/sh
@@ -47,6 +53,7 @@ done
 
 cat > "$TMP/bin/linuxdeploy" <<'EOF'
 #!/bin/sh
+printf '%s\n' "$@" > "${AUTOSUBS_TEST_LINUXDEPLOY_ARGS:?}"
 exit 0
 EOF
 chmod +x "$TMP/bin/linuxdeploy"
@@ -71,6 +78,10 @@ run_build() {
   AUTOSUBS_FC_LIST="$TMP/runtime/fc-list" \
   AUTOSUBS_FC_SCAN="$TMP/runtime/fc-scan" \
   AUTOSUBS_CURL="$TMP/runtime/curl" \
+  AUTOSUBS_CA_CERT_FILE="$TMP/runtime/ca-certificates.crt" \
+  AUTOSUBS_LIBJACK="$TMP/runtime/libjack.so.0" \
+  AUTOSUBS_APPIMAGE_RUNTIME="$TMP/runtime/runtime-$expected_arch" \
+  AUTOSUBS_TEST_LINUXDEPLOY_ARGS="$TMP/linuxdeploy-$slot.args" \
   AUTOSUBS_LINUXDEPLOY="$TMP/bin/linuxdeploy" \
   AUTOSUBS_APPIMAGETOOL="$TMP/bin/appimagetool" \
   AUTOSUBS_APPIMAGE_BUILD_DIR="$build_dir" \
@@ -94,7 +105,9 @@ run_build() {
   [[ -x "$appdir/usr/bin/fc-scan" ]] || fail "fc-scan missing"
   [[ -x "$appdir/usr/bin/curl" ]] || fail "curl missing"
   [[ -f "$appdir/usr/share/autosubs/frontend/index.html" ]] || fail "frontend missing"
-  [[ -f "$appdir/usr/share/metainfo/io.github.GodsQuantum.AutoSubs.metainfo.xml" ]] || fail "metainfo missing"
+  [[ -f "$appdir/usr/share/autosubs/ca-certificates.crt" ]] || fail "CA bundle missing"
+  [[ -f "$appdir/usr/share/metainfo/io.github.GodsQuantum.AutoSubs.appdata.xml" ]] || fail "AppStream metadata missing"
+  [[ -f "$appdir/usr/lib/libjack.so.0" ]] || fail "libjack runtime compatibility library missing"
   [[ -L "$appdir/io.github.GodsQuantum.AutoSubs.desktop" ]] || fail "root desktop symlink missing"
   [[ -L "$appdir/autosubs.svg" ]] || fail "root icon symlink missing"
   [[ -L "$appdir/.DirIcon" ]] || fail ".DirIcon missing"
