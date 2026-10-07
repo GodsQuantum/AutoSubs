@@ -369,7 +369,7 @@ mod tests {
 
         let app = Router::new().route(
             "/align",
-            post(|| async {
+            post(|_body: axum::body::Bytes| async {
                 Json(serde_json::json!({
                     "word_segments": [
                         {"word": "Bonjour", "start": 0.12, "end": 0.43},
