@@ -155,9 +155,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::error::Release $RELEASE_TAG already exists; refusing to move its tag."
-            exit 1
+          if RELEASE_DRAFT="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            if [[ "$RELEASE_DRAFT" != "true" ]]; then
+              echo "::error::Published release $RELEASE_TAG already exists; refusing to move its immutable tag."
+              exit 1
+            fi
+            echo "Reusing existing draft release $RELEASE_TAG."
           fi
 
           if TAG_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null)"; then
@@ -185,16 +188,23 @@ jobs:
           VERIFIED_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')"
           test "$VERIFIED_SHA" = "$GITHUB_SHA"
 
-      - name: Create GitHub release
+      - name: Create draft GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          gh release create "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --title "AutoSubs $RELEASE_TAG" \
-            --generate-notes \
-            --latest
+          set -euo pipefail
+          if RELEASE_DRAFT="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            test "$RELEASE_DRAFT" = "true"
+            echo "Draft release $RELEASE_TAG already exists; reusing it."
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "AutoSubs $RELEASE_TAG" \
+              --generate-notes \
+              --draft
+          fi
 
   attach-appimage:
     name: Attach native AppImages
@@ -228,4 +238,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release upload "$RELEASE_TAG"             --repo "$GITHUB_REPOSITORY"             --clobber             dist/*.AppImage             dist/*.AppImage.sha256
+          gh release upload "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber \
+            dist/*.AppImage \
+            dist/*.AppImage.sha256
+
+      - name: Publish immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --latest
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = "false"

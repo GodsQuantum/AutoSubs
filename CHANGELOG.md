@@ -4,6 +4,14 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.5.1] - 2026-10-07
+
+### Fixed
+
+- GitHub release automation now creates a draft release, attaches and verifies both AppImage architectures plus their SHA-256 files, then publishes once so repositories with immutable releases enabled remain fully supported.
+- Release reruns can safely reuse an existing draft while still refusing to modify an already published immutable release.
+- Native AppImages are attached before publication; v3.5.1 is the first complete immutable GitHub release for the new Linux AppImage distribution.
+
 ## [3.5.0] - 2026-10-07
 
 ### Added
