@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api';
   import type { FontFace, FormatProfile, Preset, SubtitleWord } from '$lib/types';
   import { activeWordIndex, customFontMatch, clampPreviewPosition, demoSubtitleWords, formatRatio, karaokeProgress, loopedPreviewTime, previewSubtitleTokens, wordByWordPreviewTokens, previewWidthForRatio, safeZoneGuide, subtitlePositionBounds, scalePreviewMetric, videoObjectFit } from '$lib/preview.js';
 
@@ -16,6 +17,7 @@
   export let controls = false;
   export let videoId = '';
   export let captionsSrc = '';
+  export let jobId = '';
   export let safeZone: SafeZoneKey = 'off';
   export let onVideoTimeUpdate: (time:number)=>void = ()=>{};
   export let editable = false;
@@ -30,6 +32,14 @@
   let frameElement:HTMLDivElement|undefined;
   let measuredWidth=0;
   let measuredHeight=0;
+  let authoritativePreviewUrl='';
+  let previewError='';
+  let previewLoading=false;
+  let previewController:AbortController|undefined;
+  let previewTimer:ReturnType<typeof setTimeout>|undefined;
+  let previewKey='';
+  let videoPlaying=false;
+  let dragging=false;
   const demoDuration = 3;
 
   onMount(()=>{
@@ -50,8 +60,41 @@
       frame=requestAnimationFrame(tick);
     };
     frame=requestAnimationFrame(tick);
-    return ()=>{cancelAnimationFrame(frame);resizeObserver?.disconnect();window.removeEventListener("resize",measure);};
+    return ()=>{
+      cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize",measure);
+      if(previewTimer)clearTimeout(previewTimer);
+      previewController?.abort();
+      if(authoritativePreviewUrl)URL.revokeObjectURL(authoritativePreviewUrl);
+    };
   });
+
+  async function requestAuthoritative(timestamp:number) {
+    if(!p || !text.trim())return;
+    previewController?.abort();
+    const controller=new AbortController();
+    previewController=controller;
+    previewLoading=true;
+    previewError='';
+    try{
+      const blob=await api.previewFrame({preset:{...p,format},text,words:timedWords,timestamp:Math.max(0,timestamp),jobId:jobId||undefined},controller.signal);
+      if(controller.signal.aborted)return;
+      const next=URL.createObjectURL(blob);
+      if(authoritativePreviewUrl)URL.revokeObjectURL(authoritativePreviewUrl);
+      authoritativePreviewUrl=next;
+    }catch(error){
+      if(controller.signal.aborted)return;
+      previewError=error instanceof Error?error.message:String(error);
+    }finally{
+      if(previewController===controller)previewLoading=false;
+    }
+  }
+
+  function scheduleAuthoritative(timestamp:number) {
+    if(previewTimer)clearTimeout(previewTimer);
+    previewTimer=setTimeout(()=>requestAuthoritative(timestamp),180);
+  }
 
   $: effectiveSourceRatio = naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : sourceRatio;
   $: ratio = formatRatio(format, effectiveSourceRatio);
@@ -84,13 +127,19 @@
   $: estimatedBlockHeight = visualLines * fontSize + Math.max(0,visualLines-1) * scalePreviewMetric(p?.lineSpacing ?? 0,displayHeight);
   $: positionBounds = subtitlePositionBounds(displayWidth, displayHeight, estimatedBlockWidth, estimatedBlockHeight);
   $: outlineSize = p ? scalePreviewMetric(p.outlineThickness,displayHeight) : 0;
-  $: shadowSize = p ? scalePreviewMetric(p.shadowThickness ?? 1,displayHeight) : 0;
+  $: shadowX = p ? (Number(p.shadowOffsetX ?? p.shadowThickness ?? 0) * displayHeight / 1080) : 0;
+  $: shadowY = p ? (Number(p.shadowOffsetY ?? p.shadowThickness ?? 0) * displayHeight / 1080) : 0;
+  $: shadowBlur = p ? scalePreviewMetric(p.shadowBlur ?? 0,displayHeight) : 0;
+  $: shadowOpacity = p ? Math.min(100,Math.max(0,Number(p.shadowOpacity ?? 100))) : 100;
   $: safePosition = clampPreviewPosition(p?.positionX ?? 50, p?.positionY ?? 68, positionBounds);
   $: subtitleStyle = p
-    ? `top:${safePosition.y}%;left:${safePosition.x}%;font-size:${fontSize}px;line-height:${lineHeight};color:${p.baseColor};font-family:"${renderedFamily.replaceAll('"','\\"')}";font-weight:${renderedWeight};font-style:${renderedItalic?'italic':'normal'};font-synthesis:none;text-transform:${p.uppercase?'uppercase':'none'};-webkit-text-stroke:${outlineSize}px ${p.outlineColor};text-shadow:0 ${shadowSize}px ${shadowSize*2}px ${p.shadowColor??'#000000'};`
+    ? `top:${safePosition.y}%;left:${safePosition.x}%;font-size:${fontSize}px;line-height:${lineHeight};color:${p.baseColor};font-family:"${renderedFamily.replaceAll('"','\\"')}";font-weight:${renderedWeight};font-style:${renderedItalic?'italic':'normal'};font-synthesis:none;text-transform:${p.uppercase?'uppercase':'none'};-webkit-text-stroke:${outlineSize}px ${p.outlineColor};text-shadow:${shadowX}px ${shadowY}px ${shadowBlur}px color-mix(in srgb, ${p.shadowColor??'#000000'} ${shadowOpacity}%, transparent);`
     : `top:${safePosition.y}%;left:${safePosition.x}%;font-size:${fontSize}px;line-height:${lineHeight};color:#fff;font-weight:800;`;
   $: formatLabel = format.key === 'source' ? 'Source' : format.key === 'portrait916' ? '9:16' : format.key === 'landscape169' ? '16:9' : format.key === 'square11' ? '1:1' : format.key === 'portrait45' ? '4:5' : `${format.width || '?'}×${format.height || '?'}`;
   $: resolutionLabel = format.key === 'portrait916' ? '1080×1920' : format.key === 'landscape169' ? '1920×1080' : format.key === 'square11' ? '1080×1080' : format.key === 'portrait45' ? '1080×1350' : format.key === 'custom' ? `${format.width || '?'}×${format.height || '?'}` : naturalWidth && naturalHeight ? `${naturalWidth}×${naturalHeight}` : '';
+
+  $: nextPreviewKey = p && text.trim() ? JSON.stringify([p,format,text,timedWords,jobId]) : '';
+  $: if(nextPreviewKey && nextPreviewKey!==previewKey){previewKey=nextPreviewKey;scheduleAuthoritative(videoSrc?currentTime:0.8);}
 
   function updatePosition(event: PointerEvent) {
     if (!editable) return;
@@ -108,6 +157,7 @@
 
   function startDrag(event: PointerEvent) {
     if (!editable) return;
+    dragging=true;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     updatePosition(event);
   }
@@ -120,6 +170,8 @@
   function stopDrag(event: PointerEvent) {
     const target = event.currentTarget as HTMLElement;
     if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
+    dragging=false;
+    scheduleAuthoritative(videoSrc?(videoElement?.currentTime??currentTime):0.8);
   }
 
   function nudgePosition(event: KeyboardEvent) {
@@ -153,10 +205,11 @@
       preload="metadata"
       playsinline
       style={`object-fit:${objectFit}`}
-      on:loadedmetadata={(e)=>{const v=e.currentTarget as HTMLVideoElement;naturalWidth=v.videoWidth;naturalHeight=v.videoHeight;}}
+      on:loadedmetadata={(e)=>{const v=e.currentTarget as HTMLVideoElement;naturalWidth=v.videoWidth;naturalHeight=v.videoHeight;scheduleAuthoritative(v.currentTime);}}
+      on:play={()=>videoPlaying=true}
       on:timeupdate={(e)=>onVideoTimeUpdate((e.currentTarget as HTMLVideoElement).currentTime)}
-      on:pause={(e)=>onVideoTimeUpdate((e.currentTarget as HTMLVideoElement).currentTime)}
-      on:seeked={(e)=>onVideoTimeUpdate((e.currentTarget as HTMLVideoElement).currentTime)}
+      on:pause={(e)=>{const v=e.currentTarget as HTMLVideoElement;videoPlaying=false;onVideoTimeUpdate(v.currentTime);scheduleAuthoritative(v.currentTime);}}
+      on:seeked={(e)=>{const v=e.currentTarget as HTMLVideoElement;onVideoTimeUpdate(v.currentTime);if(v.paused)scheduleAuthoritative(v.currentTime);}}
     >
       <track
         kind="captions"
@@ -168,6 +221,12 @@
   {:else}
     <div class="preview-art" aria-hidden="true"></div>
   {/if}
+
+  {#if authoritativePreviewUrl}
+    <img class:hidden={videoPlaying || dragging} class="authoritative-preview" src={authoritativePreviewUrl} alt="" aria-hidden="true" />
+  {/if}
+  {#if previewLoading && !authoritativePreviewUrl}<div class="preview-state">Rendu exact…</div>{/if}
+  {#if previewError}<div class="preview-state error" title={previewError}>Preview exact indisponible</div>{/if}
 
   <div class="preview-meta">{formatLabel}{#if resolutionLabel}<span> · {resolutionLabel}</span>{/if}</div>
   {#if !videoSrc}
@@ -193,7 +252,7 @@
     <div class="safe-zone-box" style={`inset:${guide.top*100}% ${guide.right*100}% ${guide.bottom*100}% ${guide.left*100}%`}><span>{guide.label}</span></div>
   {/if}
 
-  {#if text.trim()}
+  {#if text.trim() && (!authoritativePreviewUrl || videoPlaying || dragging)}
     {#if editable}
       <button
         type="button"
@@ -218,6 +277,10 @@
   .format-preview.awaiting-source { visibility:hidden; }
   .preview-art { position:absolute; inset:0; background:linear-gradient(145deg,rgba(255,255,255,.08),transparent 38%),radial-gradient(circle at 70% 72%,rgba(61,215,207,.12),transparent 32%); }
   video { width:100%; height:100%; display:block; background:#000; }
+  .authoritative-preview { position:absolute; z-index:2; inset:0; width:100%; height:100%; object-fit:fill; pointer-events:none; }
+  .authoritative-preview.hidden { display:none; }
+  .preview-state { position:absolute; z-index:9; right:10px; bottom:10px; padding:5px 8px; border-radius:7px; background:rgba(3,6,7,.78); color:#d9e4e5; font:700 10px/1.1 Inter,ui-sans-serif,system-ui,sans-serif; pointer-events:none; }
+  .preview-state.error { color:#ff9f9b; max-width:65%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .preview-meta { position:absolute; z-index:5; top:10px; left:10px; padding:5px 8px; border:1px solid rgba(255,255,255,.13); border-radius:999px; background:rgba(3,6,7,.72); backdrop-filter:blur(8px); color:#d9e4e5; font:700 10px/1.1 Inter,ui-sans-serif,system-ui,sans-serif; letter-spacing:.025em; pointer-events:none; }
   .preview-meta span { color:#839398; font-weight:650; }
   .demo-controls { position:absolute; z-index:8; top:9px; right:9px; display:flex; gap:5px; }

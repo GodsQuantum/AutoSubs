@@ -19,6 +19,10 @@ pub struct SettingsView {
     local_transcription_url: String,
     local_transcription_model: String,
     local_transcription_api_key_set: bool,
+    alignment_enabled: bool,
+    alignment_url: String,
+    alignment_model: String,
+    alignment_api_key_set: bool,
     llm_enabled: bool,
     llm_endpoint: String,
     llm_model: String,
@@ -38,6 +42,10 @@ impl From<&Settings> for SettingsView {
             local_transcription_url: s.local_transcription_url.clone(),
             local_transcription_model: s.local_transcription_model.clone(),
             local_transcription_api_key_set: !s.local_transcription_api_key.is_empty(),
+            alignment_enabled: s.alignment_enabled,
+            alignment_url: s.alignment_url.clone(),
+            alignment_model: s.alignment_model.clone(),
+            alignment_api_key_set: !s.alignment_api_key.is_empty(),
             llm_enabled: s.llm_enabled,
             llm_endpoint: s.llm_endpoint.clone(),
             llm_model: s.llm_model.clone(),
@@ -89,6 +97,11 @@ pub struct SettingsUpdate {
     local_transcription_model: String,
     #[serde(default)]
     local_transcription_api_key: Option<SecretPatch>,
+    alignment_enabled: bool,
+    alignment_url: String,
+    alignment_model: String,
+    #[serde(default)]
+    alignment_api_key: Option<SecretPatch>,
     llm_enabled: bool,
     llm_endpoint: String,
     llm_model: String,
@@ -113,6 +126,9 @@ pub async fn update_settings(
     settings.local_fallback_enabled = body.local_fallback_enabled;
     settings.local_transcription_url = body.local_transcription_url;
     settings.local_transcription_model = body.local_transcription_model;
+    settings.alignment_enabled = body.alignment_enabled;
+    settings.alignment_url = body.alignment_url;
+    settings.alignment_model = body.alignment_model;
     settings.llm_enabled = body.llm_enabled;
     settings.llm_endpoint = body.llm_endpoint;
     settings.llm_model = body.llm_model;
@@ -126,6 +142,7 @@ pub async fn update_settings(
         &mut settings.local_transcription_api_key,
         body.local_transcription_api_key,
     )?;
+    apply_secret(&mut settings.alignment_api_key, body.alignment_api_key)?;
     apply_secret(&mut settings.llm_api_key, body.llm_api_key)?;
     state
         .db
@@ -145,6 +162,9 @@ pub async fn update_settings_legacy(
     }
     if incoming.local_transcription_api_key.is_empty() {
         incoming.local_transcription_api_key = current.local_transcription_api_key.clone();
+    }
+    if incoming.alignment_api_key.is_empty() {
+        incoming.alignment_api_key = current.alignment_api_key.clone();
     }
     if incoming.llm_api_key.is_empty() {
         incoming.llm_api_key = current.llm_api_key.clone();
@@ -224,6 +244,24 @@ mod model_endpoint_regression_tests {
             file_stability_ms: 0,
             max_upload_bytes: 10 * 1024 * 1024,
         }
+    }
+
+    #[test]
+    fn settings_view_exposes_alignment_without_leaking_secret() {
+        let settings = Settings {
+            alignment_enabled: true,
+            alignment_url: "http://aligner.local/align".into(),
+            alignment_api_key: "super-secret".into(),
+            alignment_model: "fr-aligner".into(),
+            ..Settings::default()
+        };
+
+        let view = SettingsView::from(&settings);
+
+        assert!(view.alignment_enabled);
+        assert_eq!(view.alignment_url, "http://aligner.local/align");
+        assert_eq!(view.alignment_model, "fr-aligner");
+        assert!(view.alignment_api_key_set);
     }
 
     #[tokio::test]

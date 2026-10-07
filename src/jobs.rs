@@ -1,10 +1,15 @@
 use crate::domain::{
-    Asset, Brand, EncoderKind, Job, JobOutro, JobStatus, Preset, RawWord, SubtitleLine,
+    Asset, Brand, Job, JobOutro, JobStatus, Preset, RawWord, RenderProfile, SubtitleLine,
     TimingQuality, TranscriptTimeline, TranscriptionResponse, Workflow, WorkflowOutput,
 };
+use crate::media::align::{align_timeline, timeline_as_transcription};
 use crate::media::process::ProcessError;
 use crate::media::transcribe::{TranscriptionError, extract_audio, transcribe_audio};
-use crate::media::{auto_encoder_order, build_render_plan, probe_media, render_video};
+use crate::media::{build_render_plan, probe_media, render_video, resolve_render_policy};
+use crate::render_history::{
+    RenderHistory, RenderHistorySample, RenderOptions, RenderProfileOption, estimate_render,
+    push_sample,
+};
 use crate::state::AppState;
 use crate::subtitle::{
     NormalizeOptions,
@@ -20,7 +25,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use std::hash::{Hash, Hasher};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -70,6 +75,13 @@ pub fn create_job(
         input_path: Some(input_path),
         output_path: None,
         preset_id,
+        effective_preset: None,
+        resolved_brand_id: None,
+        timing_quality: None,
+        timing_fallback: None,
+        render_profile: crate::domain::RenderProfile::Auto,
+        last_render_encoder: None,
+        last_render_elapsed_ms: None,
         outro: crate::domain::JobOutro::Inherit,
         format: workflow.map(|w| w.format.clone()).unwrap_or_default(),
         workflow_id: workflow.map(|w| w.id.clone()),
@@ -240,17 +252,11 @@ async fn prepare_job(
     } else {
         None
     };
-    let preset = resolve_preset(
-        state,
-        &job.original_name,
-        workflow.as_ref(),
-        job.preset_id.as_deref(),
-    )
-    .await;
-    if workflow.is_some() {
-        let preset_format = preset.format.clone();
-        update_job(state, id, move |job| job.format = preset_format)?;
-    }
+    let job = resolve_and_snapshot_job_preset(state, id, workflow.as_ref()).await?;
+    let preset = job
+        .effective_preset
+        .clone()
+        .ok_or_else(|| anyhow!("job has no effective preset after prepare"))?;
     let lines = if !force_audio && let Some(sidecar) = job.attached_sidecar.clone() {
         load_sidecar(&sidecar, &preset).await?
     } else {
@@ -265,21 +271,42 @@ async fn prepare_job(
             .context("extract transcription audio")?;
         let settings = state.settings.read().await.clone();
         let result = transcribe_audio(&audio, &settings, &state.http, token).await;
-        let _ = tokio::fs::remove_file(&audio).await;
         let transcription = match result {
             Ok(v) => v,
-            Err(TranscriptionError::Cancelled) => bail!("cancelled"),
-            Err(e) => return Err(e.into()),
+            Err(TranscriptionError::Cancelled) => {
+                let _ = tokio::fs::remove_file(&audio).await;
+                bail!("cancelled")
+            }
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&audio).await;
+                return Err(e.into());
+            }
         };
-        persist_transcript(state, id, &transcript_timeline(&transcription))?;
+        let native_timeline = transcript_timeline(&transcription);
+        let alignment =
+            align_timeline(&audio, &native_timeline, &settings, &state.http, token).await;
+        let _ = tokio::fs::remove_file(&audio).await;
+        if token.is_cancelled() {
+            bail!("cancelled");
+        }
+        let timing_fallback = alignment.fallback_reason.clone();
+        persist_transcript(state, id, &alignment.timeline)?;
+        update_job(state, id, move |job| {
+            job.timing_fallback = timing_fallback;
+        })?;
+        let effective_transcription = timeline_as_transcription(&alignment.timeline);
         let raw_path = state.config.work_dir().join(format!("{id}_words.json"));
-        tokio::fs::write(&raw_path, serde_json::to_vec_pretty(&transcription)?).await?;
+        tokio::fs::write(
+            &raw_path,
+            serde_json::to_vec_pretty(&effective_transcription)?,
+        )
+        .await?;
         let (output_width, output_height) = preset
             .format
             .resolution(Some((probe.width, probe.height)))
             .unwrap_or((probe.width, probe.height));
         let lines = crate::subtitle::group_transcription_into_lines_with_layout(
-            &transcription,
+            &effective_transcription,
             LayoutOptions {
                 max_chars: preset.max_chars,
                 max_lines: preset.max_lines,
@@ -330,6 +357,74 @@ fn finish_error(state: &AppState, id: &str, token: &CancellationToken, error: an
     });
 }
 
+pub async fn render_options(state: &AppState, id: &str) -> Result<RenderOptions> {
+    let job = get_job(state, id)?;
+    let input = job
+        .input_path
+        .clone()
+        .ok_or_else(|| anyhow!("job has no input"))?;
+    let preset = job
+        .effective_preset
+        .clone()
+        .ok_or_else(|| anyhow!("job has no effective preset"))?;
+    let token = CancellationToken::new();
+    let source = probe_media(&input, &token)
+        .await
+        .context("probe render options input")?;
+    let outro = resolve_outro(state, &preset, &job.outro).await;
+    let outro_duration = if let Some(path) = outro {
+        probe_media(&path, &token)
+            .await
+            .map(|probe| probe.duration)
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let media_duration = (source.duration + outro_duration).max(0.1);
+    let target = preset
+        .format
+        .resolution(Some((source.width, source.height)))
+        .unwrap_or((source.width, source.height));
+    let target_pixels = u64::from(target.0.max(1)) * u64::from(target.1.max(1));
+    let caps = state.encoders.read().await.clone();
+    let settings = state.settings.read().await.clone();
+    let history = state
+        .db
+        .get_singleton::<RenderHistory>("render_history")?
+        .unwrap_or_default();
+    let options = [
+        RenderProfile::Auto,
+        RenderProfile::Fast,
+        RenderProfile::Quality,
+        RenderProfile::Compact,
+    ]
+    .into_iter()
+    .map(|profile| {
+        let policy = resolve_render_policy(profile, &settings.encoder, &caps);
+        let encoder = policy.encoder.kind;
+        let estimate = estimate_render(
+            profile,
+            &encoder,
+            media_duration,
+            target_pixels,
+            &caps,
+            &history,
+        );
+        RenderProfileOption {
+            profile,
+            encoder,
+            estimate,
+        }
+    })
+    .collect();
+
+    Ok(RenderOptions {
+        options,
+        actual_encoder: job.last_render_encoder,
+        last_elapsed_ms: job.last_render_elapsed_ms,
+    })
+}
+
 pub fn enqueue_render(state: AppState, id: String) -> Result<()> {
     let job = get_job(&state, &id)?;
     if !matches!(
@@ -359,7 +454,7 @@ pub fn enqueue_render(state: AppState, id: String) -> Result<()> {
 
 async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Result<()> {
     let _slot = cancellable_permit(state.render_slots.clone(), token).await?;
-    let job = get_job(state, id)?;
+    let mut job = get_job(state, id)?;
     let input = job
         .input_path
         .clone()
@@ -393,15 +488,13 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
     {
         archive_candidates.push(sidecar.clone());
     }
-    let mut preset = resolve_preset(
-        state,
-        &job.original_name,
-        workflow.as_ref(),
-        job.preset_id.as_deref(),
-    )
-    .await;
-    // The job owns output geometry. A preset supplies styling; it must never silently override a job format.
-    preset.format = job.format.clone();
+    if job.effective_preset.is_none() {
+        job = resolve_and_snapshot_job_preset(state, id, workflow.as_ref()).await?;
+    }
+    let preset = job
+        .effective_preset
+        .clone()
+        .ok_or_else(|| anyhow!("job has no effective preset to render"))?;
     let source = probe_media(&input, token)
         .await
         .context("probe render input")?;
@@ -438,14 +531,8 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
         job.error = None;
     })?;
     let settings = state.settings.read().await.clone();
-    let mut render_order = if settings.encoder.kind == EncoderKind::Auto {
-        auto_encoder_order(&caps)
-    } else {
-        vec![settings.encoder.kind.clone()]
-    };
-    if settings.encoder.kind == EncoderKind::Auto && !render_order.contains(&EncoderKind::Libx264) {
-        render_order.push(EncoderKind::Libx264);
-    }
+    let policy = resolve_render_policy(job.render_profile, &settings.encoder, &caps);
+    let render_order = policy.fallback_order.clone();
     let (progress_tx, mut progress_rx) = mpsc::channel(16);
     let progress_state = state.clone();
     let progress_id = id.to_owned();
@@ -457,9 +544,15 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
         }
     });
     let duration = source.duration + outro_probe.as_ref().map(|p| p.duration).unwrap_or(0.0);
+    let render_started = Instant::now();
     let mut result = Ok(());
+    let mut used_encoder = None;
+    let mut successful_elapsed_ms = 0_u64;
+    let mut target_pixels = u64::from(source.width) * u64::from(source.height);
+    let mut fallback_count = 0_u32;
+    let mut fallback_overhead_ms = 0_u64;
     for (attempt, encoder_kind) in render_order.iter().cloned().enumerate() {
-        let mut encoder = settings.encoder.clone();
+        let mut encoder = policy.encoder.clone();
         encoder.kind = encoder_kind.clone();
         let plan = build_render_plan(
             &input,
@@ -472,12 +565,21 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
             outro.as_deref().zip(outro_probe.as_ref()),
             Some(&state.config.fonts_dir),
         )?;
+        target_pixels = u64::from(plan.target_resolution.0) * u64::from(plan.target_resolution.1);
+        let attempt_started = Instant::now();
         match render_video(&plan, duration, token, Some(progress_tx.clone())).await {
             Ok(()) => {
+                successful_elapsed_ms =
+                    u64::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                used_encoder = Some(plan.encoder.clone());
                 result = Ok(());
                 break;
             }
             Err(error) => {
+                fallback_count = fallback_count.saturating_add(1);
+                fallback_overhead_ms = fallback_overhead_ms.saturating_add(
+                    u64::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                );
                 let is_last = attempt + 1 == render_order.len();
                 if token.is_cancelled() || is_last {
                     result = Err(error);
@@ -495,6 +597,9 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
     }
     progress_task.abort();
     result.map_err(|e| anyhow!(e)).context("render video")?;
+    let used_encoder = used_encoder.ok_or_else(|| anyhow!("render completed without encoder"))?;
+    let total_render_elapsed_ms =
+        u64::try_from(render_started.elapsed().as_millis()).unwrap_or(u64::MAX);
     if token.is_cancelled() {
         bail!("cancelled");
     }
@@ -549,6 +654,27 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
             .await
             .context("archive source bundle after successful render")?;
     }
+    let mut history = state
+        .db
+        .get_singleton::<RenderHistory>("render_history")?
+        .unwrap_or_default();
+    push_sample(
+        &mut history,
+        RenderHistorySample {
+            id: Uuid::new_v4().to_string(),
+            profile: job.render_profile,
+            encoder: used_encoder.clone(),
+            media_duration_seconds: duration,
+            target_pixels,
+            elapsed_ms: successful_elapsed_ms,
+            successful: true,
+            fallback_count,
+            fallback_overhead_ms,
+            created_at_ms: now_ms(),
+        },
+    );
+    state.db.set_singleton("render_history", &history)?;
+
     update_job(state, id, move |job| {
         job.status = JobStatus::Done;
         job.progress = Some(100);
@@ -556,6 +682,8 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
         job.output_path = Some(final_video);
         job.input_path = Some(effective_input);
         job.archive_after_success = false;
+        job.last_render_encoder = Some(used_encoder);
+        job.last_render_elapsed_ms = Some(total_render_elapsed_ms);
     })?;
     Ok(())
 }
@@ -594,7 +722,103 @@ pub fn save_subtitles(
 }
 
 pub fn persist_transcript(state: &AppState, id: &str, timeline: &TranscriptTimeline) -> Result<()> {
-    state.db.upsert("job_transcript", id, timeline)
+    state.db.upsert("job_transcript", id, timeline)?;
+    if state.jobs.contains_key(id) {
+        let quality = timeline.timing_quality;
+        update_job(state, id, move |job| {
+            job.timing_quality = Some(quality);
+        })?;
+    }
+    Ok(())
+}
+
+pub async fn apply_preset_to_job(state: &AppState, id: &str, preset_id: &str) -> Result<Job> {
+    let current = get_job(state, id)?;
+    if current.status.is_active() {
+        bail!("cannot apply a preset while the job is active");
+    }
+    if !state
+        .presets
+        .read()
+        .await
+        .iter()
+        .any(|preset| preset.id == preset_id)
+    {
+        bail!("unknown preset: {preset_id}");
+    }
+    let workflow = if let Some(workflow_id) = current.workflow_id.as_deref() {
+        state
+            .workflows
+            .read()
+            .await
+            .iter()
+            .find(|workflow| workflow.id == workflow_id)
+            .cloned()
+    } else {
+        None
+    };
+    let preset_id = preset_id.to_owned();
+    update_job(state, id, move |job| {
+        job.preset_id = Some(preset_id);
+    })?;
+    let snapshotted = resolve_and_snapshot_job_preset(state, id, workflow.as_ref()).await?;
+    let preset = snapshotted
+        .effective_preset
+        .clone()
+        .ok_or_else(|| anyhow!("job has no effective preset after applying preset"))?;
+    let timeline = state
+        .db
+        .get::<TranscriptTimeline>("job_transcript", id)?
+        .ok_or_else(|| anyhow!("job has no canonical word timing to resegment"))?;
+    if timeline.words.is_empty() {
+        bail!("job has no canonical word timing to resegment");
+    }
+    let transcription = TranscriptionResponse {
+        text: None,
+        words: Some(
+            timeline
+                .words
+                .iter()
+                .map(|word| RawWord {
+                    word: Some(word.word.clone()),
+                    start: Some(word.start),
+                    end: Some(word.end),
+                })
+                .collect(),
+        ),
+        segments: None,
+    };
+    let lines = if let Some(input) = snapshotted
+        .input_path
+        .as_ref()
+        .filter(|path| path.is_file())
+    {
+        let token = CancellationToken::new();
+        match probe_media(input, &token).await {
+            Ok(probe) => {
+                let (output_width, output_height) = preset
+                    .format
+                    .resolution(Some((probe.width, probe.height)))
+                    .unwrap_or((probe.width, probe.height));
+                crate::subtitle::group_transcription_into_lines_with_layout(
+                    &transcription,
+                    LayoutOptions {
+                        max_chars: preset.max_chars,
+                        max_lines: preset.max_lines,
+                        output_width,
+                        font_size: scale_ass_metric(preset.size, output_height),
+                    },
+                )
+            }
+            Err(_) => {
+                group_transcription_into_lines(&transcription, preset.max_chars, preset.max_lines)
+            }
+        }
+    } else {
+        group_transcription_into_lines(&transcription, preset.max_chars, preset.max_lines)
+    };
+    save_subtitles(state, id, lines)?;
+    get_job(state, id)
 }
 
 pub fn regroup_subtitles(
@@ -648,6 +872,12 @@ pub fn regroup_subtitles(
         max_lines,
     );
     save_subtitles(state, id, lines.clone())?;
+    update_job(state, id, |job| {
+        if let Some(preset) = job.effective_preset.as_mut() {
+            preset.max_chars = max_chars;
+            preset.max_lines = max_lines;
+        }
+    })?;
     Ok(lines)
 }
 
@@ -767,52 +997,170 @@ fn extract_parenthesized_preset(filename: &str) -> Option<&str> {
     (!value.is_empty()).then_some(value)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedPreset {
+    pub preset: Preset,
+    pub brand_id: Option<String>,
+}
+
+fn keyword_match_score(filename: &str, keywords: Option<&str>) -> Option<usize> {
+    let lower = filename.to_lowercase();
+    keywords?
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter_map(|keyword| {
+            let normalized = keyword.to_lowercase();
+            lower
+                .contains(&normalized)
+                .then_some(normalized.chars().count())
+        })
+        .max()
+}
+
+fn resolve_brand(
+    brands: &[Brand],
+    filename: &str,
+    workflow: Option<&Workflow>,
+) -> Result<Option<Brand>> {
+    if let Some(id) = workflow.and_then(|value| value.brand_id.as_deref()) {
+        return brands
+            .iter()
+            .find(|brand| brand.id == id)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| anyhow!("unknown workflow brand: {id}"));
+    }
+
+    let mut matches = brands
+        .iter()
+        .filter_map(|brand| {
+            keyword_match_score(filename, brand.match_keywords.as_deref())
+                .map(|score| (score, brand))
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let Some((best_score, best)) = matches.first().copied() else {
+        return Ok(None);
+    };
+    if matches
+        .iter()
+        .skip(1)
+        .any(|(score, brand)| *score == best_score && brand.id != best.id)
+    {
+        bail!("ambiguous brand keyword match for {filename}");
+    }
+    Ok(Some(best.clone()))
+}
+
+pub async fn resolve_effective_preset(
+    state: &AppState,
+    filename: &str,
+    workflow: Option<&Workflow>,
+    requested: Option<&str>,
+) -> Result<ResolvedPreset> {
+    let presets = state.presets.read().await.clone();
+    let brands = state.brands.read().await.clone();
+    let brand = resolve_brand(&brands, filename, workflow)?;
+
+    let explicit_id = requested.or_else(|| workflow.and_then(|value| value.preset_id.as_deref()));
+    let mut preset =
+        explicit_id.and_then(|id| presets.iter().find(|preset| preset.id == id).cloned());
+
+    if preset.is_none()
+        && let Some(name) = extract_parenthesized_preset(filename)
+    {
+        preset = presets
+            .iter()
+            .find(|candidate| candidate.name.eq_ignore_ascii_case(name))
+            .cloned();
+    }
+
+    if preset.is_none() {
+        preset = presets
+            .iter()
+            .filter_map(|candidate| {
+                keyword_match_score(filename, candidate.match_keywords.as_deref())
+                    .map(|score| (score, candidate))
+            })
+            .max_by_key(|(score, _)| *score)
+            .map(|(_, candidate)| candidate.clone());
+    }
+
+    if preset.is_none()
+        && let Some(brand) = brand.as_ref()
+    {
+        let format_key = workflow
+            .map(|value| value.format.key)
+            .unwrap_or(crate::domain::FormatKey::Source);
+        preset = brand
+            .default_preset_by_format
+            .get(&format_key)
+            .and_then(|id| presets.iter().find(|candidate| candidate.id == *id))
+            .cloned();
+    }
+
+    let mut preset = preset
+        .or_else(|| {
+            presets
+                .iter()
+                .find(|candidate| candidate.name == "Default")
+                .cloned()
+        })
+        .or_else(|| presets.first().cloned())
+        .unwrap_or_default();
+
+    let brand_id = brand.as_ref().map(|value| value.id.clone());
+    if let Some(brand) = brand {
+        preset.brand_id = Some(brand.id);
+        if let Some(color) = brand
+            .highlight_color
+            .filter(|value| !value.trim().is_empty())
+        {
+            preset.highlight_color = color;
+        }
+    }
+
+    Ok(ResolvedPreset { preset, brand_id })
+}
+
 pub async fn resolve_preset(
     state: &AppState,
     filename: &str,
     workflow: Option<&Workflow>,
     requested: Option<&str>,
 ) -> Preset {
-    let presets = state.presets.read().await.clone();
-    let brands = state.brands.read().await.clone();
-    if let Some(id) = requested.or_else(|| workflow.and_then(|w| w.preset_id.as_deref()))
-        && let Some(p) = presets.iter().find(|p| p.id == id)
-    {
-        return p.clone();
-    }
-    if let Some(name) = extract_parenthesized_preset(filename)
-        && let Some(p) = presets.iter().find(|p| p.name.eq_ignore_ascii_case(name))
-    {
-        return p.clone();
-    }
-    let workflow_brand = workflow.and_then(|w| w.brand_id.as_deref());
-    let lower = filename.to_lowercase();
-    if let Some(p) = presets.iter().find(|p| {
-        (workflow_brand.is_none() || p.brand_id.as_deref() == workflow_brand)
-            && p.match_keywords.as_deref().is_some_and(|keywords| {
-                keywords
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .any(|k| lower.contains(&k.to_lowercase()))
-            })
-    }) {
-        return p.clone();
-    }
-    if let Some(workflow) = workflow
-        && let Some(brand_id) = workflow.brand_id.as_deref()
-        && let Some(brand) = brands.iter().find(|b| b.id == brand_id)
-        && let Some(id) = brand.default_preset_by_format.get(&workflow.format.key)
-        && let Some(p) = presets.iter().find(|p| p.id == *id)
-    {
-        return p.clone();
-    }
-    presets
-        .iter()
-        .find(|p| p.name == "Default")
-        .cloned()
-        .or_else(|| presets.first().cloned())
+    resolve_effective_preset(state, filename, workflow, requested)
+        .await
+        .map(|resolved| resolved.preset)
         .unwrap_or_default()
+}
+
+pub async fn resolve_and_snapshot_job_preset(
+    state: &AppState,
+    id: &str,
+    workflow: Option<&Workflow>,
+) -> Result<Job> {
+    let job = get_job(state, id)?;
+    let resolved = resolve_effective_preset(
+        state,
+        &job.original_name,
+        workflow,
+        job.preset_id.as_deref(),
+    )
+    .await?;
+    let preset = resolved.preset;
+    let format = preset.format.clone();
+    let brand_id = resolved.brand_id;
+    update_job(state, id, move |job| {
+        job.format = format;
+        job.resolved_brand_id = brand_id;
+        job.effective_preset = Some(preset);
+    })
 }
 
 async fn resolve_outro(state: &AppState, preset: &Preset, selection: &JobOutro) -> Option<PathBuf> {
@@ -1143,6 +1491,7 @@ pub fn error_is_cancelled(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{FormatKey, FormatProfile};
 
     async fn test_state() -> (tempfile::TempDir, AppState) {
         let root = tempfile::tempdir().unwrap();
@@ -1162,6 +1511,37 @@ mod tests {
             max_upload_bytes: 1024,
         };
         (root, AppState::load(config).await.unwrap())
+    }
+
+    #[tokio::test]
+    async fn persisted_timeline_updates_job_timing_provenance() {
+        let (_root, state) = test_state().await;
+        let job = create_job(
+            &state,
+            "clip.mp4".into(),
+            PathBuf::from("clip.mp4"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        persist_transcript(
+            &state,
+            &job.id,
+            &TranscriptTimeline {
+                words: vec![crate::domain::SubtitleWord {
+                    word: "test".into(),
+                    start: 0.0,
+                    end: 0.5,
+                }],
+                timing_quality: TimingQuality::Aligned,
+            },
+        )
+        .unwrap();
+
+        let stored = get_job(&state, &job.id).unwrap();
+        assert_eq!(stored.timing_quality, Some(TimingQuality::Aligned));
     }
 
     #[tokio::test]
@@ -1356,6 +1736,234 @@ mod tests {
             (resolved.id.as_str(), resolved.max_chars, resolved.max_lines),
             ("selected", 12, 1)
         );
+    }
+
+    #[tokio::test]
+    async fn explicit_generic_preset_keeps_layout_while_brand_keyword_overrides_highlight() {
+        let (_root, state) = test_state().await;
+        let generic = Preset {
+            id: "generic".into(),
+            name: "Generic 9:16".into(),
+            max_chars: 18,
+            max_lines: 1,
+            highlight_color: "#112233".into(),
+            ..Preset::default()
+        };
+        let brand_default = Preset {
+            id: "brand-default".into(),
+            name: "Brand default".into(),
+            max_chars: 40,
+            ..Preset::default()
+        };
+        let brand = Brand {
+            id: "chougar".into(),
+            name: "Chougar".into(),
+            description: String::new(),
+            assets: Default::default(),
+            preset_ids: vec!["brand-default".into()],
+            default_preset_by_format: [(FormatKey::Source, "brand-default".into())]
+                .into_iter()
+                .collect(),
+            match_keywords: Some("chougar,cf".into()),
+            highlight_color: Some("#ff00aa".into()),
+        };
+        *state.presets.write().await = vec![generic, brand_default];
+        *state.brands.write().await = vec![brand];
+
+        let resolved =
+            resolve_effective_preset(&state, "CHougar_episode.mp4", None, Some("generic"))
+                .await
+                .unwrap();
+
+        assert_eq!(resolved.preset.id, "generic");
+        assert_eq!(resolved.preset.max_chars, 18);
+        assert_eq!(resolved.preset.max_lines, 1);
+        assert_eq!(resolved.preset.highlight_color, "#ff00aa");
+        assert_eq!(resolved.brand_id.as_deref(), Some("chougar"));
+    }
+
+    #[tokio::test]
+    async fn equal_specificity_brand_keyword_matches_are_rejected() {
+        let (_root, state) = test_state().await;
+        *state.presets.write().await = vec![Preset {
+            id: "generic".into(),
+            name: "Generic".into(),
+            ..Preset::default()
+        }];
+        *state.brands.write().await = vec![
+            Brand {
+                id: "a".into(),
+                name: "A".into(),
+                description: String::new(),
+                assets: Default::default(),
+                preset_ids: Vec::new(),
+                default_preset_by_format: Default::default(),
+                match_keywords: Some("show".into()),
+                highlight_color: None,
+            },
+            Brand {
+                id: "b".into(),
+                name: "B".into(),
+                description: String::new(),
+                assets: Default::default(),
+                preset_ids: Vec::new(),
+                default_preset_by_format: Default::default(),
+                match_keywords: Some("show".into()),
+                highlight_color: None,
+            },
+        ];
+
+        let error = resolve_effective_preset(&state, "show-42.mp4", None, Some("generic"))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("ambiguous brand"));
+    }
+
+    #[tokio::test]
+    async fn snapshotting_explicit_manual_preset_persists_complete_render_and_layout_config() {
+        let (_root, state) = test_state().await;
+        let preset = Preset {
+            id: "selected".into(),
+            name: "Selected".into(),
+            format: FormatProfile {
+                key: FormatKey::Portrait916,
+                fit: crate::domain::FitMode::Cover,
+                width: None,
+                height: None,
+            },
+            max_chars: 14,
+            max_lines: 1,
+            size: 37.0,
+            animation_style: crate::domain::AnimationStyle::WordByWord,
+            ..Preset::default()
+        };
+        *state.presets.write().await = vec![preset];
+
+        let job = create_job(
+            &state,
+            "manual.mp4".into(),
+            PathBuf::from("manual.mp4"),
+            None,
+            Some("selected".into()),
+            None,
+        )
+        .unwrap();
+
+        let snapshotted = resolve_and_snapshot_job_preset(&state, &job.id, None)
+            .await
+            .unwrap();
+        let effective = snapshotted.effective_preset.expect("effective preset");
+
+        assert_eq!(effective.id, "selected");
+        assert_eq!(effective.max_chars, 14);
+        assert_eq!(effective.max_lines, 1);
+        assert_eq!(effective.size, 37.0);
+        assert_eq!(
+            effective.animation_style,
+            crate::domain::AnimationStyle::WordByWord
+        );
+        assert_eq!(effective.format.key, FormatKey::Portrait916);
+        assert_eq!(snapshotted.format.key, FormatKey::Portrait916);
+    }
+
+    #[tokio::test]
+    async fn regroup_updates_the_effective_preset_segmentation_limits() {
+        let (_root, state) = test_state().await;
+        let effective = Preset {
+            id: "snapshot".into(),
+            ..Preset::default()
+        };
+        let job = create_job(
+            &state,
+            "manual.mp4".into(),
+            PathBuf::from("manual.mp4"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        update_job(&state, &job.id, |job| {
+            job.status = JobStatus::Ready;
+            job.effective_preset = Some(effective);
+        })
+        .unwrap();
+        persist_transcript(
+            &state,
+            &job.id,
+            &TranscriptTimeline {
+                words: vec![
+                    crate::domain::SubtitleWord {
+                        word: "un".into(),
+                        start: 0.0,
+                        end: 0.4,
+                    },
+                    crate::domain::SubtitleWord {
+                        word: "deux".into(),
+                        start: 0.5,
+                        end: 1.0,
+                    },
+                ],
+                timing_quality: TimingQuality::Exact,
+            },
+        )
+        .unwrap();
+
+        regroup_subtitles(&state, &job.id, 4, 1).unwrap();
+
+        let updated = get_job(&state, &job.id).unwrap();
+        let effective = updated.effective_preset.unwrap();
+        assert_eq!(effective.max_chars, 4);
+        assert_eq!(effective.max_lines, 1);
+    }
+
+    #[tokio::test]
+    async fn applying_a_preset_to_a_ready_job_resegments_from_the_canonical_timeline() {
+        let (_root, state) = test_state().await;
+        *state.presets.write().await = vec![Preset {
+            id: "tight".into(),
+            name: "Tight".into(),
+            max_chars: 4,
+            max_lines: 1,
+            ..Preset::default()
+        }];
+        let job = create_job(
+            &state,
+            "manual.mp4".into(),
+            PathBuf::from("manual.mp4"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        update_job(&state, &job.id, |job| job.status = JobStatus::Ready).unwrap();
+        persist_transcript(
+            &state,
+            &job.id,
+            &TranscriptTimeline {
+                words: vec![
+                    crate::domain::SubtitleWord {
+                        word: "un".into(),
+                        start: 0.0,
+                        end: 0.4,
+                    },
+                    crate::domain::SubtitleWord {
+                        word: "deux".into(),
+                        start: 0.5,
+                        end: 1.0,
+                    },
+                ],
+                timing_quality: TimingQuality::Exact,
+            },
+        )
+        .unwrap();
+
+        let updated = apply_preset_to_job(&state, &job.id, "tight").await.unwrap();
+
+        assert_eq!(updated.effective_preset.as_ref().unwrap().id, "tight");
+        assert_eq!(updated.effective_preset.as_ref().unwrap().max_chars, 4);
+        assert_eq!(updated.lines.as_ref().unwrap().len(), 2);
+        assert_eq!(updated.lines.as_ref().unwrap()[0].text, "un");
+        assert_eq!(updated.lines.as_ref().unwrap()[1].text, "deux");
     }
 
     #[test]

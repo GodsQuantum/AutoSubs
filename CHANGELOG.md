@@ -4,6 +4,28 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-10-07
+
+### Added
+
+- Optional validated forced-alignment stage for precision word boundaries, with timing provenance and safe fallback to native transcription timings.
+- Authoritative FFmpeg/libass preview frames shared with the final render filter chain, plus a combined system/app font catalog and safe UI font import.
+- Explicit subtitle shadow X/Y offset, blur, opacity and color controls with migration from legacy scalar shadows.
+- Per-job Auto, Fast, Quality and Compact render profiles with resolved-encoder visibility and bounded ETA ranges learned from successful render history.
+- Explicit visual line-break editing and constrained 10 ms word-boundary nudging without discarding canonical word timings.
+
+### Changed
+
+- Job/preset/brand resolution is snapshotted deterministically so preview, regrouping, exports and final render consume the same effective configuration.
+- Preset continuous controls pair sliders with numeric inputs; settled previews are rendered by the backend while CSS remains transient interaction feedback only.
+- App-managed fonts default to `/fonts` but the directory is configurable through `AUTOSUBS_FONTS_DIR`; writable mounts enable UI imports.
+- Render fallback attempts keep profile quality settings, record the encoder that actually succeeded, and widen future ETA confidence without polluting successful throughput samples.
+
+### Fixed
+
+- Preview/final discrepancies in font, position, outline, shadow and format processing are eliminated by sharing the FFmpeg/libass visual filter builder.
+- Manual line breaks and word-timing edits preserve timing invariants and remain bounded by adjacent words.
+
 ## [3.3.0] - 2026-10-02
 
 ### Added

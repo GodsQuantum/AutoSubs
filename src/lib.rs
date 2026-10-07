@@ -7,6 +7,7 @@ pub mod fonts;
 pub mod format;
 pub mod jobs;
 pub mod media;
+pub mod render_history;
 pub mod state;
 pub mod subtitle;
 pub mod workflows;
