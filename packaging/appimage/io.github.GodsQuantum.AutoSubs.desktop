@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=AutoSubs
+GenericName=Subtitle Production
+Comment=Create, edit and automate high-quality video subtitles
+Exec=autosubs
+Icon=autosubs
+Categories=AudioVideo;Video;
+Terminal=false
+StartupNotify=false
+X-AppImage-Name=AutoSubs
+X-AppImage-Version=@VERSION@
+X-AppImage-Arch=@ARCH@

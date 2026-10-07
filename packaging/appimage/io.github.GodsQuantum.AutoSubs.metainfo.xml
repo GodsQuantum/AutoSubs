@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.GodsQuantum.AutoSubs</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>AutoSubs</name>
+  <developer id="io.github.godsquantum">
+    <name>GodsQuantum</name>
+  </developer>
+  <summary>Subtitle production and folder automation for video</summary>
+  <description>
+    <p>AutoSubs creates, edits, previews and renders subtitles with precise word timing, reusable presets, brands and automated folder workflows.</p>
+    <p>The native AppImage runs the same local Rust backend and web interface as the self-hosted Docker distribution.</p>
+  </description>
+  <launchable type="desktop-id">io.github.GodsQuantum.AutoSubs.desktop</launchable>
+  <provides>
+    <binary>autosubs</binary>
+  </provides>
+  <url type="homepage">https://github.com/GodsQuantum/AutoSubs</url>
+  <url type="bugtracker">https://github.com/GodsQuantum/AutoSubs/issues</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+</component>
