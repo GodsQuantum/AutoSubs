@@ -59,6 +59,11 @@ jobs:
           test "$EXPECTED" = "$CARGO_VERSION"
           test "$EXPECTED" = "$FRONTEND_VERSION"
 
+  appimage:
+    name: Native AppImage
+    needs: version
+    uses: ./.github/workflows/appimage.yml
+
   build:
     name: Build release ${{ matrix.arch }}
     needs: [validate, version]
@@ -126,14 +131,14 @@ jobs:
         run: |
           docker buildx imagetools create \
             --metadata-file /tmp/metadata.json \
-            -t ghcr.io/godsquantum/autosubs:${RELEASE_TAG} \
+            -t "ghcr.io/godsquantum/autosubs:${RELEASE_TAG}" \
             -t ghcr.io/godsquantum/autosubs:latest \
-            ghcr.io/godsquantum/autosubs:${GITHUB_SHA}-amd64 \
-            ghcr.io/godsquantum/autosubs:${GITHUB_SHA}-arm64
+            "ghcr.io/godsquantum/autosubs:${GITHUB_SHA}-amd64" \
+            "ghcr.io/godsquantum/autosubs:${GITHUB_SHA}-arm64"
           DIGEST="$(jq -r '.["containerimage.descriptor"].digest' /tmp/metadata.json)"
           test "${DIGEST#sha256:}" != "$DIGEST"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
-          docker buildx imagetools inspect ghcr.io/godsquantum/autosubs:${RELEASE_TAG}
+          docker buildx imagetools inspect "ghcr.io/godsquantum/autosubs:${RELEASE_TAG}"
 
       - name: Attest published image
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -186,3 +191,37 @@ jobs:
             --title "AutoSubs $RELEASE_TAG" \
             --generate-notes \
             --latest
+
+  attach-appimage:
+    name: Attach native AppImages
+    needs: [publish, appimage]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Download AppImage artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: autosubs-appimage-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify downloaded AppImages
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lah dist
+          test "$(find dist -maxdepth 1 -type f -name '*.AppImage' | wc -l)" -eq 2
+          test "$(find dist -maxdepth 1 -type f -name '*.AppImage.sha256' | wc -l)" -eq 2
+          (
+            cd dist
+            sha256sum -c ./*.AppImage.sha256
+          )
+
+      - name: Attach AppImages to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG"             --repo "$GITHUB_REPOSITORY"             --clobber             dist/*.AppImage             dist/*.AppImage.sha256

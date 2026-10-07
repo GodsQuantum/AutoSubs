@@ -1,0 +1,163 @@
+name: Native AppImage
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'src/**'
+      - 'frontend/**'
+      - 'packaging/appimage/**'
+      - '.github/workflows/appimage.yml'
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: AppImage ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '26.10.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Rust 1.98.1
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup default 1.98.1
+
+      - name: Install AppImage runtime build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            appstream \
+            curl \
+            desktop-file-utils \
+            ffmpeg \
+            fontconfig \
+            shellcheck
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build backend
+        run: cargo build --release --locked
+
+      - name: Verify packaging contracts
+        run: |
+          shellcheck -x \
+            packaging/appimage/AppRun \
+            packaging/appimage/fetch-tools.sh \
+            packaging/appimage/build.sh \
+            packaging/appimage/test-launcher.sh \
+            packaging/appimage/test-packaging.sh
+          packaging/appimage/test-launcher.sh
+          packaging/appimage/test-packaging.sh
+
+      - name: Build AppImage
+        env:
+          AUTOSUBS_APPIMAGE_BUILD_DIR: ${{ runner.temp }}/autosubs-appimage-build
+          AUTOSUBS_APPIMAGE_OUTPUT_DIR: ${{ github.workspace }}/dist
+          AUTOSUBS_APPIMAGE_KEEP_APPDIR: '1'
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: packaging/appimage/build.sh "${{ matrix.arch }}"
+
+      - name: Smoke native AppImage
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          AUTOSUBS_APPIMAGE_OPEN_BROWSER: '0'
+        run: |
+          set -euo pipefail
+          VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')"
+          IMAGE="dist/AutoSubs-${VERSION}-${{ matrix.arch }}.AppImage"
+          test -x "$IMAGE"
+          "$IMAGE" --version | grep -F "autosubs ${VERSION}"
+
+          APPDIR="${RUNNER_TEMP}/autosubs-appimage-build/AutoSubs.AppDir"
+          for tool in autosubs ffmpeg ffprobe fc-list fc-scan curl; do
+            test -x "$APPDIR/usr/bin/$tool"
+          done
+
+          SMOKE="${RUNNER_TEMP}/autosubs-appimage-smoke"
+          rm -rf "$SMOKE"
+          mkdir -p "$SMOKE/home" "$SMOKE/config" "$SMOKE/data" "$SMOKE/state"
+          LOG="$SMOKE/backend.log"
+
+          HOME="$SMOKE/home" \
+          XDG_CONFIG_HOME="$SMOKE/config" \
+          XDG_DATA_HOME="$SMOKE/data" \
+          XDG_STATE_HOME="$SMOKE/state" \
+          AUTOSUBS_PORT=39051 \
+          AUTOSUBS_APPIMAGE_OPEN_BROWSER=0 \
+          "$IMAGE" --no-browser >"$LOG" 2>&1 &
+          PID=$!
+          trap 'kill "$PID" >/dev/null 2>&1 || true; wait "$PID" >/dev/null 2>&1 || true' EXIT
+
+          HEALTH=""
+          for _ in $(seq 1 80); do
+            HEALTH="$(curl -fsS http://127.0.0.1:39051/api/v1/health 2>/dev/null || true)"
+            case "$HEALTH" in *'"status":"ok"'*) break;; esac
+            if ! kill -0 "$PID" 2>/dev/null; then
+              cat "$LOG"
+              exit 1
+            fi
+            sleep 0.25
+          done
+
+          printf '%s\n' "$HEALTH"
+          echo "$HEALTH" | grep -q '"status":"ok"'
+          echo "$HEALTH" | grep -q '"ffmpegReady":true'
+          echo "$HEALTH" | grep -q '"libass":true'
+          echo "$HEALTH" | grep -q "\"version\":\"${VERSION}\""
+
+          STATUS="$(curl -sS -o "$SMOKE/index.html" -w '%{http_code}' http://127.0.0.1:39051/)"
+          test "$STATUS" = "200"
+          grep -qi 'autosubs' "$SMOKE/index.html"
+
+          test -d "$SMOKE/config/autosubs"
+          test -d "$SMOKE/data/autosubs"
+          test -d "$SMOKE/data/autosubs/fonts"
+          test -d "$SMOKE/state/autosubs"
+
+      - name: Verify checksum
+        shell: bash
+        run: |
+          cd dist
+          sha256sum -c ./*.AppImage.sha256
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: autosubs-appimage-${{ matrix.arch }}
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.sha256
+          if-no-files-found: error
+          retention-days: 14
