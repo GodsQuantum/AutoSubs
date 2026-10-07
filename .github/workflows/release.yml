@@ -160,7 +160,11 @@ jobs:
             exit 1
           fi
 
-          TAG_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null || true)"
+          if TAG_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null)"; then
+            :
+          else
+            TAG_SHA=""
+          fi
           if [[ -n "$TAG_SHA" && "$TAG_SHA" != "$GITHUB_SHA" ]]; then
             if [[ "${{ inputs.replace_unreleased_tag }}" != "true" ]]; then
               echo "::error::Tag $RELEASE_TAG points to $TAG_SHA instead of $GITHUB_SHA. Re-run with replace_unreleased_tag=true only if the existing tag is unreleased."
