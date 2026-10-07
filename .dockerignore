@@ -1,5 +1,9 @@
 .git
-.github
+.github/*
+!.github/workflows
+.github/workflows/*
+!.github/workflows/appimage.yml
+!.github/workflows/release.yml
 .gitignore
 .env
 .env.*
