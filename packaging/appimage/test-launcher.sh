@@ -113,6 +113,12 @@ run_clean env APPDIR="$APPDIR1" HOME="$HOME1" USER="tester" \
 assert_not_exists "$CAP2"
 assert_contains "$OPEN2" "http://127.0.0.1:3051/"
 
+CAP_VERSION="$TMP/version.capture"
+run_clean env APPDIR="$APPDIR1" HOME="$HOME1" USER="tester" \
+  AUTOSUBS_TEST_CAPTURE="$CAP_VERSION" AUTOSUBS_TEST_OPEN_CAPTURE="$TMP/version.open" \
+  AUTOSUBS_TEST_EXISTING=1 AUTOSUBS_APPIMAGE_FORCE_STDIO=1 "$APPRUN" --version
+assert_contains "$CAP_VERSION" "ARGS=--version|"
+
 CAP3="$TMP/background.capture"
 OPEN3="$TMP/background.open"
 MARK3="$TMP/background.ready"

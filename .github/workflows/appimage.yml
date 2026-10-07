@@ -57,7 +57,11 @@ jobs:
             curl \
             desktop-file-utils \
             ffmpeg \
+            file \
             fontconfig \
+            libjack0 \
+            procps \
+            python3 \
             shellcheck
 
       - name: Build frontend
@@ -118,7 +122,12 @@ jobs:
           AUTOSUBS_APPIMAGE_OPEN_BROWSER=0 \
           "$IMAGE" --no-browser >"$LOG" 2>&1 &
           PID=$!
-          trap 'kill "$PID" >/dev/null 2>&1 || true; wait "$PID" >/dev/null 2>&1 || true' EXIT
+          cleanup_appimage() {
+            pkill -TERM -P "$PID" >/dev/null 2>&1 || true
+            kill "$PID" >/dev/null 2>&1 || true
+            wait "$PID" >/dev/null 2>&1 || true
+          }
+          trap cleanup_appimage EXIT
 
           HEALTH=""
           for _ in $(seq 1 80); do

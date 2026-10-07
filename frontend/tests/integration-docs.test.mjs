@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const root = new URL('../../', import.meta.url);
 
-test('v3.4.0 integration docs expose the shipped version and lifecycle API', async () => {
+test('v3.5.0 integration docs expose the shipped version, AppImage and lifecycle API', async () => {
   const [cargo, frontend, lock, changelog, readme] = await Promise.all([
     readFile(new URL('Cargo.toml', root), 'utf8'),
     readFile(new URL('frontend/package.json', root), 'utf8'),
@@ -13,9 +13,18 @@ test('v3.4.0 integration docs expose the shipped version and lifecycle API', asy
     readFile(new URL('README.md', root), 'utf8')
   ]);
 
-  assert.match(cargo, /version = "3\.4\.0"/);
-  assert.match(frontend, /"version": "3\.4\.0"/);
-  assert.match(lock, /"version": "3\.4\.0"/g);
+  assert.match(cargo, /version = "3\.5\.0"/);
+  assert.match(frontend, /"version": "3\.5\.0"/);
+  assert.match(lock, /"version": "3\.5\.0"/g);
+  for (const topic of [
+    'AppImage',
+    '--background',
+    'XDG_CONFIG_HOME',
+    'AUTOSUBS_USE_SYSTEM_MEDIA_TOOLS',
+    'folder workflows'
+  ]) {
+    assert.ok(readme.includes(topic), `missing AppImage README topic: ${topic}`);
+  }
   for (const endpoint of [
     '/api/v1/fonts',
     '/api/v1/fonts/css',
@@ -45,6 +54,7 @@ test('native AppImage workflow builds and attaches both Linux architectures', as
   assert.match(workflow, /packaging\/appimage\/build\.sh/);
   assert.match(workflow, /ffmpegReady/);
   assert.match(workflow, /libass/);
+  assert.match(workflow, /\bfile\b/);
   assert.match(workflow, /actions\/upload-artifact/);
   assert.match(workflow, /AUTOSUBS_APPIMAGE_OPEN_BROWSER/);
   assert.match(workflow, /APPIMAGE_EXTRACT_AND_RUN/);
