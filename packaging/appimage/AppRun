@@ -92,7 +92,10 @@ HEALTH_URL="${URL}api/v1/health"
 
 health_ready() {
   command -v curl >/dev/null 2>&1 || return 1
-  curl -fsS --max-time 1 "$HEALTH_URL" 2>/dev/null | grep -q '"status":"ok"'
+  body=$(curl -fsS --max-time 1 "$HEALTH_URL" 2>/dev/null) || return 1
+  printf '%s' "$body" | grep -q '"status":"ok"' || return 1
+  printf '%s' "$body" | grep -q '"ffmpegReady":' || return 1
+  printf '%s' "$body" | grep -q '"libass":' || return 1
 }
 
 open_url() {

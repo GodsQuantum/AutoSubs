@@ -52,8 +52,12 @@ EOF
 
   cat > "$dir/usr/bin/curl" <<'EOF'
 #!/bin/sh
+if [ "${AUTOSUBS_TEST_FOREIGN:-0}" = "1" ]; then
+  printf '{"status":"ok","service":"something-else"}\n'
+  exit 0
+fi
 if [ "${AUTOSUBS_TEST_EXISTING:-0}" = "1" ] || { [ -n "${AUTOSUBS_TEST_SERVER_MARKER-}" ] && [ -e "$AUTOSUBS_TEST_SERVER_MARKER" ]; }; then
-  printf '{"status":"ok","version":"test"}\n'
+  printf '{"status":"ok","version":"test","ffmpegReady":true,"libass":true}\n'
   exit 0
 fi
 exit 22
@@ -118,6 +122,12 @@ run_clean env APPDIR="$APPDIR1" HOME="$HOME1" USER="tester" \
   AUTOSUBS_TEST_CAPTURE="$CAP_VERSION" AUTOSUBS_TEST_OPEN_CAPTURE="$TMP/version.open" \
   AUTOSUBS_TEST_EXISTING=1 AUTOSUBS_APPIMAGE_FORCE_STDIO=1 "$APPRUN" --version
 assert_contains "$CAP_VERSION" "ARGS=--version|"
+
+CAP_FOREIGN="$TMP/foreign.capture"
+run_clean env APPDIR="$APPDIR1" HOME="$HOME1" USER="tester" \
+  AUTOSUBS_TEST_CAPTURE="$CAP_FOREIGN" AUTOSUBS_TEST_OPEN_CAPTURE="$TMP/foreign.open" \
+  AUTOSUBS_TEST_FOREIGN=1 AUTOSUBS_APPIMAGE_FORCE_STDIO=1 "$APPRUN" --no-browser
+assert_contains "$CAP_FOREIGN" "HOST=127.0.0.1"
 
 CAP3="$TMP/background.capture"
 OPEN3="$TMP/background.open"
