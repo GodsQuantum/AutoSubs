@@ -11,8 +11,8 @@
     "test": "node --test tests/*.test.mjs"
   },
   "devDependencies": {
-    "@sveltejs/adapter-static": "3.0.10",
-    "@sveltejs/kit": "2.70.3",
+    "@sveltejs/adapter-static": "4.0.0",
+    "@sveltejs/kit": "3.0.0",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@typescript/native": "npm:typescript@7.0.2",
     "svelte": "5.57.2",
