@@ -26,7 +26,7 @@ STT = "http://192.168.1.219:8005/v1/audio/transcriptions"
 ALIGN = "http://192.168.1.219:8006/align"
 MODEL = "deepdml/faster-whisper-large-v3-turbo-ct2"
 EXTS = {".mp4", ".mkv", ".mov", ".m4v", ".avi", ".webm"}
-CHUNK_SECONDS = 240
+CHUNK_SECONDS = 90
 
 def db_open():
     db = sqlite3.connect(DB, timeout=60)
@@ -70,6 +70,21 @@ def transcription_options(language):
     # Speaches word-granularity itself calls the same remote aligner and fails 503
     # if it is briefly down. Align exactly once, explicitly, after STT.
     return {"model": MODEL, "language": language, "response_format": "verbose_json"}
+
+def chunk_identity(video, size, mtime_ns, seconds=CHUNK_SECONDS):
+    return f"{video.resolve()}:{size}:{mtime_ns}:chunks={seconds}"
+
+def get_words_retry(video, start, n, language, attempts=3):
+    for try_number in range(attempts):
+        try:
+            return get_words(video, start, n, language)
+        except (RuntimeError, urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
+            temporary = any(token in str(exc).lower() for token in (
+                "503", "502", "504", "429", "timed out", "timeout", "connection", "remote end closed", "unavailable"))
+            if not temporary or try_number == attempts-1:
+                raise
+            print(f"RETRY audio chunk at {start:.1f}s ({try_number+1}/{attempts}), {type(exc).__name__}: {exc}", flush=True)
+            time.sleep(min(10 * (2 ** try_number), 60))
 
 def get_words(segment, start, n, language):
     clip_host = TMP_HOST / f"clip-{os.getpid()}-{uuid.uuid4().hex}.wav"
@@ -200,7 +215,7 @@ def run(db, limit=0, needle="", smoke=False):
         stem=video.with_suffix("")
         if not smoke and all(Path(str(stem)+ext).exists() for ext in (".md",".srt",".words.json")):
             continue
-        ident=f"{video.resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
+        ident=chunk_identity(video,stat.st_size,stat.st_mtime_ns)
         language = "en" if "anglais" in video.name.lower() else "fr"
         try:
             duration=duration_seconds(video)
@@ -213,7 +228,7 @@ def run(db, limit=0, needle="", smoke=False):
                 cached=db.execute("SELECT words_json FROM chunks WHERE identity=? AND part=?",(ident,i)).fetchone()
                 if cached and not smoke: chunk=json.loads(cached[0])
                 else:
-                    chunk=get_words(video,start,n,language)
+                    chunk=get_words_retry(video,start,n,language)
                     if not smoke:
                         with db: db.execute("INSERT OR REPLACE INTO chunks VALUES(?,?,?)",
                                             (ident,i,json.dumps(chunk,ensure_ascii=False)))
