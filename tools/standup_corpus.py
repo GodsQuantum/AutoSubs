@@ -66,6 +66,11 @@ def multipart(fields, filename, contents, url, timeout=600):
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"{url}: HTTP {exc.code}: {exc.read(900)!r}") from exc
 
+def transcription_options(language):
+    # Speaches word-granularity itself calls the same remote aligner and fails 503
+    # if it is briefly down. Align exactly once, explicitly, after STT.
+    return {"model": MODEL, "language": language, "response_format": "verbose_json"}
+
 def get_words(segment, start, n, language):
     clip_host = TMP_HOST / f"clip-{os.getpid()}-{uuid.uuid4().hex}.wav"
     clip_docker = f"{TMP_CONTAINER}/{clip_host.name}"
@@ -75,8 +80,7 @@ def get_words(segment, start, n, language):
                    "-ss", f"{start:.3f}", "-i", source, "-t", f"{n:.3f}", "-vn",
                    "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", clip_docker, timeout=180)
         sound = clip_host.read_bytes()
-        transcript = multipart({"model": MODEL, "language": language, "response_format": "verbose_json",
-                                "timestamp_granularities[]": "word"}, "clip.wav", sound, STT)
+        transcript = multipart(transcription_options(language), "clip.wav", sound, STT)
         raw_text = str(transcript.get("text") or "").strip()
         if not raw_text or not any(character.isalnum() for character in raw_text):
             # Silent/music-only clips can hallucinate punctuation ("... ... ...").
