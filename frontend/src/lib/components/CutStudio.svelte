@@ -51,7 +51,7 @@
   function shortcuts(event:KeyboardEvent){
     if(event.metaKey||event.ctrlKey||event.altKey||event.shiftKey||locked||cutWorking||!duration)return;
     const target=event.target as HTMLElement|null;
-    if(target?.isContentEditable || ['INPUT','TEXTAREA','SELECT','BUTTON'].includes(target?.tagName||''))return;
+    if(target?.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(target?.tagName||''))return;
     if(event.key.toLowerCase()==='i'){markIn();event.preventDefault();}
     if(event.key.toLowerCase()==='o'){markOut();event.preventDefault();}
   }
@@ -180,6 +180,8 @@
   .cut-mark{position:absolute;top:-4px;bottom:-4px;width:3px;background:#f0ba63}
   .cut-mark.end{background:#c8aeec}
   .cut-track input[type="range"]{position:relative;z-index:2;width:100%;margin:0 10px;accent-color:#ecf1f8;cursor:ew-resize;background:transparent}
+  .cut-track input[type="range"]::-webkit-slider-runnable-track{background:transparent}
+  .cut-track input[type="range"]::-moz-range-track{background:transparent}
   .cut-buttons button{min-height:37px}
   .cut-piece{padding:3px 0;border-bottom:1px solid var(--border,rgba(160,160,160,.2))}
   kbd{font-family:inherit;border:1px solid var(--border,#666);border-radius:4px;padding:1px 5px}
