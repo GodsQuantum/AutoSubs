@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const root = new URL('../../', import.meta.url);
 
-test('v3.6.1 integration docs expose the shipped version, AppImage and lifecycle API', async () => {
+test('v3.6.2 integration docs expose the shipped version, AppImage and lifecycle API', async () => {
   const [cargo, frontend, lock, changelog, readme] = await Promise.all([
     readFile(new URL('Cargo.toml', root), 'utf8'),
     readFile(new URL('frontend/package.json', root), 'utf8'),
@@ -13,9 +13,9 @@ test('v3.6.1 integration docs expose the shipped version, AppImage and lifecycle
     readFile(new URL('README.md', root), 'utf8')
   ]);
 
-  assert.match(cargo, /version = "3\.6\.1"/);
-  assert.match(frontend, /"version": "3\.6\.1"/);
-  assert.match(lock, /"version": "3\.6\.1"/g);
+  assert.match(cargo, /version = "3\.6\.2"/);
+  assert.match(frontend, /"version": "3\.6\.2"/);
+  assert.match(lock, /"version": "3\.6\.2"/g);
   for (const topic of [
     'AppImage',
     '--background',
