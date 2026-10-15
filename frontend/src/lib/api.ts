@@ -19,6 +19,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   jobs: () => request<Job[]>('/api/v1/jobs'),
+  cut: (id:string, keep: {start:number;end:number}[]) => request<{id:string;status:string;outputPath?:string;error?:string}>(`/api/v1/jobs/${id}/cut`, {method:'POST',body:JSON.stringify({keep})}),
+  cutStatus: (id:string) => request<{id:string;status:string;outputPath?:string;error?:string}>(`/api/v1/cuts/${id}`),
   job: (id: string) => request<Job>(`/api/v1/jobs/${id}`),
   createFromPath: (path: string, sidecarPath?: string, presetId?: string) => request<Job>('/api/v1/jobs/from-path', {
     method: 'POST', body: JSON.stringify({ path, sidecarPath: sidecarPath || undefined, presetId: presetId || undefined })
