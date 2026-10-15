@@ -1,6 +1,5 @@
 <script lang="ts">
   import { api, sourceVideoUrl, subtitleExportUrl } from '$lib/api';
-  import { onDestroy } from 'svelte';
   import { dictionary } from '$lib/i18n';
   import { subtitlesToVtt } from '$lib/captions.js';
   import { splitSubtitleLine, mergeSubtitleLines, deleteSubtitleLine, insertSubtitleLineBreak, nudgeSubtitleWordBoundary, removeTerminalPeriods } from '$lib/subtitle-edit.js';
@@ -9,6 +8,7 @@
   import StatusPill from '$lib/components/StatusPill.svelte';
   import PathPicker from '$lib/components/PathPicker.svelte';
   import FormatPreview from '$lib/components/FormatPreview.svelte';
+  import CutStudio from '$lib/components/CutStudio.svelte';
 
   export let job: Job | undefined;
   export let presets: Preset[] = [];
@@ -24,47 +24,6 @@
   let dirty=false;
   let saving=false;
   let currentTime=0;
-  let cutIn=0, cutOut=0;
-  let keepRanges:{start:number;end:number}[]=[];
-  let cutTask:{id:string;status:string;outputPath?:string;error?:string}|undefined;
-  let cutWorking=false;
-  let cutPoll:ReturnType<typeof setInterval>|undefined;
-  function stamp(seconds:number){const h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),ss=Math.floor(seconds%60);return [h,m,ss].map(v=>String(v).padStart(2,'0')).join(':');}
-  function markCutIn(){cutIn=Number(currentTime.toFixed(2));}
-  function markCutOut(){cutOut=Number(currentTime.toFixed(2));}
-  function addKeepRange(){
-    const a=Number(cutIn),b=Number(cutOut);
-    const duration=document.querySelector<HTMLVideoElement>('#autosubs-editor-video')?.duration ?? 0;
-    if(!Number.isFinite(a)||!Number.isFinite(b)||a<0||b-a<.05||(Number.isFinite(duration)&&duration>0&&b>duration+.01)){
-      notify('error','Bornes de coupe invalides. Sélectionnez le début puis la fin dans la vidéo.');return;
-    }
-    const next=[...keepRanges,{start:a,end:b}].sort((x,y)=>x.start-y.start);
-    if(next.some((range,i)=>i>0&&range.start<next[i-1].end)){
-      notify('error','Les morceaux à conserver ne doivent pas se chevaucher.');return;
-    }
-    keepRanges=next;
-  }
-  function seekCut(start:number){const v=document.querySelector<HTMLVideoElement>('#autosubs-editor-video');if(v)v.currentTime=start;}
-  async function makeCut(){
-    if(!job||!keepRanges.length||cutWorking||locked)return;
-    cutWorking=true;cutTask=undefined;
-    try{
-      const task=await api.cut(job.id,keepRanges);
-      cutTask=task;
-      if(cutPoll)clearInterval(cutPoll);
-      cutPoll=setInterval(async()=>{
-        try{
-          const status=await api.cutStatus(task.id);
-          if(cutTask?.id===status.id)cutTask=status;
-          if(status.status==='done'||status.status==='error'){
-            if(cutPoll)clearInterval(cutPoll);cutPoll=undefined;cutWorking=false;
-            notify(status.status==='done'?'success':'error',status.status==='done'?'Vidéo découpée. Le fichier est disponible.':status.error||'Échec du découpage');
-          }
-        }catch(e){if(cutPoll)clearInterval(cutPoll);cutPoll=undefined;cutWorking=false;notify('error',e instanceof Error?e.message:String(e));}
-      },1750);
-    }catch(e){cutWorking=false;notify('error',e instanceof Error?e.message:String(e))}
-  }
-  onDestroy(()=>{if(cutPoll)clearInterval(cutPoll)});
   let search='';
   let exporting='';
   let outroChoice='inherit';
@@ -149,7 +108,6 @@
     if(effective){maxChars=effective.maxChars;maxLines=effective.maxLines;}
     renderProfile=j.renderProfile??'auto';
     renderOptions=undefined;renderOptionsJobId='';
-    keepRanges=[];cutIn=0;cutOut=0;cutTask=undefined;cutWorking=false;if(cutPoll)clearInterval(cutPoll);cutPoll=undefined;
     outroChoice=j.outro?.mode==='asset'?`asset:${j.outro.assetId}`:j.outro?.mode??'inherit';
   }
   function mark(){dirty=true;}
@@ -208,39 +166,9 @@
         <div class="video-stage" style="padding:14px">
           <FormatPreview format={previewFormat} preset={currentPreset} {fonts} text={activeText} words={activeWords} currentTime={currentTime} videoSrc={sourceVideoUrl(job.id)} jobId={job.id} controls={true} videoId="autosubs-editor-video" captionsSrc={captionTrackUrl} {safeZone} onVideoTimeUpdate={(time)=>currentTime=time}/>
         </div>
-        <section class="card">
-          <div class="card-header"><strong>Découpage vidéo — garder plusieurs passages</strong><span class="muted small">Montage non destructif · original conservé</span></div>
-          <div class="card-body stack">
-            <p class="help">Déplacez la tête de lecture dans la prévisualisation, marquez le début et la fin d'un passage, puis ajoutez autant de passages à conserver que nécessaire. Le bouton « Cut » crée un nouveau MP4 dans /data/cuts.</p>
-            <div class="row wrap">
-              <button class="btn" disabled={locked||cutWorking} on:click={markCutIn}>⟦ Début ici ({stamp(currentTime)})</button>
-              <button class="btn" disabled={locked||cutWorking} on:click={markCutOut}>Fin ici ⟧</button>
-              <button class="btn" disabled={locked||cutWorking} on:click={addKeepRange}>+ Garder ce passage</button>
-            </div>
-            <div class="grid two">
-              <div class="field"><label for="cut-in">Début (secondes)</label><input id="cut-in" class="input mono" type="number" step="0.01" min="0" bind:value={cutIn} disabled={locked||cutWorking}/></div>
-              <div class="field"><label for="cut-out">Fin (secondes)</label><input id="cut-out" class="input mono" type="number" step="0.01" min="0" bind:value={cutOut} disabled={locked||cutWorking}/></div>
-            </div>
-            {#each keepRanges as range,i}
-              <div class="row between wrap">
-                <button class="btn ghost" title="Prévisualiser le passage" on:click={()=>seekCut(range.start)}>▶ {stamp(range.start)} ({range.start.toFixed(2)}s) → {stamp(range.end)} ({range.end.toFixed(2)}s)</button>
-                <button class="btn danger" disabled={cutWorking} on:click={()=>keepRanges=keepRanges.filter((_,j)=>j!==i)}>Retirer</button>
-              </div>
-            {/each}
-            <div class="row wrap">
-              <button class="btn primary" disabled={locked||!keepRanges.length||cutWorking} on:click={makeCut}>{cutWorking?'Découpage en cours…':`✂ Cut — conserver ${keepRanges.length} passage(s)`}</button>
-              {#if keepRanges.length}<span class="muted small">{keepRanges.reduce((t,r)=>t+r.end-r.start,0).toFixed(2)} s de vidéo conservées</span>{/if}
-            </div>
-            {#if cutTask?.status==='done'}
-              <div class="help">Fichier créé : <code>{cutTask.outputPath}</code></div>
-              <a class="btn" href={`/api/v1/cuts/${cutTask.id}/download`}>↓ Télécharger le clip MP4</a>
-            {:else if cutTask?.status==='running'||cutTask?.status==='queued'}
-              <div class="help">Export en cours sur Cloud9. Vous pouvez continuer à utiliser l'application.</div>
-            {:else if cutTask?.status==='error'}
-              <div class="help" style="color:var(--danger)">Erreur : {cutTask.error}</div>
-            {/if}
-          </div>
-        </section>
+        {#key job.id}
+          <CutStudio jobId={job.id} {currentTime} {locked} {notify}/>
+        {/key}
         <div class="row between wrap">
           <div class="resource-meta">
             <span class="chip">{formatKey==='source'?$dictionary.sourceFormat:formatKey==='portrait916'?'9:16':formatKey==='landscape169'?'16:9':formatKey==='square11'?'1:1':formatKey==='portrait45'?'4:5':`${customWidth}×${customHeight}`}</span>
