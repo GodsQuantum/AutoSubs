@@ -6,7 +6,7 @@
 
   type SafeZoneKey = 'off'|'generic'|'tiktok'|'reels'|'shorts';
 
-  export let format: FormatProfile;
+  export let format: FormatProfile = {key:'source',fit:'preserve'};
   export let preset: Preset | undefined = undefined;
   export let fonts: FontFace[] = [];
   export let text = 'THIS IS A PREVIEW';

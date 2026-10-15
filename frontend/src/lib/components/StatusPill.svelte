@@ -2,7 +2,7 @@
   import { dictionary } from '$lib/i18n';
   import type { JobStatus } from '$lib/types';
   import type { Dictionary } from '$lib/i18n';
-  export let status: JobStatus;
+  export let status: JobStatus = 'pending';
   const labelKey: Record<JobStatus, keyof Dictionary> = {
     pending:'pending', uploading:'uploadingStatus', probing:'probing', transcribing:'transcribing', correcting:'correcting',
     ready:'ready', rendering:'rendering', done:'done', error:'failed', cancelled:'cancelled', interrupted:'interrupted'

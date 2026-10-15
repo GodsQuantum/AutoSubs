@@ -268,6 +268,9 @@ POST         /api/v1/jobs/{id}/prepare
 GET          /api/v1/jobs/{id}/render-options       Profiles, resolved encoder and ETA
 POST         /api/v1/jobs/{id}/render
 POST         /api/v1/jobs/{id}/retranscribe
+POST         /api/v1/jobs/{id}/cut                Select 1–32 ordered keep intervals (async)
+GET          /api/v1/cuts/{id}                    Cut status: queued/running/done/error
+GET          /api/v1/cuts/{id}/download           Download resulting MP4
 PUT/DELETE   /api/v1/jobs/{id}/sidecar
 POST         /api/v1/jobs/{id}/sidecar/upload
 GET/PUT      /api/v1/jobs/{id}/subtitles
@@ -295,6 +298,14 @@ DELETE       /api/v1/assets/{id}
 ```
 
 The server-side picker canonicalizes requested paths after symlink resolution and rejects paths outside `AUTOSUBS_ALLOWED_ROOTS`.
+
+### Non-destructive multi-interval cutting
+
+In the Editor, scrub through the video preview and mark **Start here** and **End here** for each segment, then **Keep this passage**. Add multiple non-overlapping passages and press **Cut**. AutoSubs concatenates the retained sections with frame-accurate FFmpeg trimming and synchronized audio, writes a fresh H.264/AAC MP4 under `/data/cuts`, and provides a download link without changing the original video. Cuts run asynchronously so a long render cannot time out the browser request. The job status is in-memory for the current backend session; output files persist separately.
+
+### Cloud9 stand-up transcript/search utility
+
+A local optional Python 3 utility under `tools/standup_corpus.py` inventories the stand-up media folder on Cloud9, chunks audio for the existing Speaches/WhisperX alignment services, saves same-stem Markdown/SRT/word-timestamp JSON sidecars, and updates an SQLite FTS5 search index with absolute video timestamps. The corpus utility is optional and Cloud9-specific; it is **not** enabled for general Docker or AppImage installs. See `tools/STANDUP_CORPUS_CLOUD9.md` for service setup, status, query examples, and original-media safeguards.
 
 ## Development
 
