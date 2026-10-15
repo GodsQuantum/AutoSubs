@@ -15,6 +15,10 @@ test('rejects inverted, overlapping, outside-duration or non-finite ranges', () 
   }
 });
 
+test('rejects a sub-millisecond overlap after rounding',()=>{
+  assert.throws(()=>addRange([{start:2,end:6.001}],6,8,20),/chevauch/);
+});
+
 test('supports precise hour-long clips and playback skips excluded sections', () => {
   assert.equal(timeLabel(3670.125),'01:01:10.125');
   const ranges=[{start:2,end:4},{start:10,end:13}];

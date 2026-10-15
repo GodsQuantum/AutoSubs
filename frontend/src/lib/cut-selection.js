@@ -15,7 +15,7 @@ export function addRange(existing,start,end,duration) {
     || start<0 || end>duration+.001 || end-start<.05) throw new Error('Plage ou durée invalide.');
   const next=[...existing,{start:Math.round(start*1000)/1000,end:Math.min(duration,Math.round(end*1000)/1000)}]
     .sort((a,b)=>a.start-b.start);
-  if(next.length>32 || next.some((r,i)=>i>0 && r.start<next[i-1].end-.001))
+  if(next.length>32 || next.some((r,i)=>i>0 && r.start<next[i-1].end))
     throw new Error('Plages qui se chevauchent ou limite de 32 extraits.');
   return next;
 }
