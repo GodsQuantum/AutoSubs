@@ -16,6 +16,12 @@ WORDS = [
 ]
 
 class CorpusTests(unittest.TestCase):
+    def test_stt_is_transcribed_without_duplicate_word_alignment(self):
+        options=corpus.transcription_options("fr")
+        self.assertEqual(options["response_format"], "verbose_json")
+        self.assertEqual(options["language"],"fr")
+        self.assertNotIn("timestamp_granularities[]", options)
+
     def test_word_timestamp_and_srt_format(self):
         srt=corpus.srt_output(WORDS)
         self.assertIn("00:00:00,150 --> 00:00:01,800",srt)

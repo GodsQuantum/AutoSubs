@@ -43,3 +43,7 @@ Ouvrir un job vidéo dans l'Éditeur, cliquer sur «Début ici», puis «Fin ici
 - `svelte-check`: 0 erreur / 0 avertissement.
 - Deux coupes 1–2 s et 4–6 s d'une source FFmpeg synthétique donnent un MP4 de 3.000 s avec vidéo et audio.
 - Les 52 vidéos du corpus ne sont **pas** certifiées complètes tant que le service n'a pas fini et les fichiers ne sont pas contrôlés.
+
+## Incident 2026-10-15, alignement temporairement indisponible
+
+Après 4 vidéos le service a subi des HTTP 503 par Speaches (alignement distant demandé automatiquement par word-granularity). Le client STT demande désormais le texte seul, puis déclenche **une seule** passe WhisperX pour les mots. Le service système garde un redémarrage lent de 5 min sans blocage permanent (StartLimitIntervalSec=0). Les anciens chunks valides sont réutilisés.

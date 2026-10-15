@@ -1,6 +1,7 @@
 //! Non-destructive multi-range video cutter. Exact boundaries via trim/atrim + concat.
 //! Render jobs run server-side and expose polling status (no reverse-proxy timeout).
 use crate::{
+    db::Database,
     domain::Job,
     error::{AppError, AppResult},
     jobs,
@@ -37,13 +38,36 @@ pub struct CutRequest {
     pub keep: Vec<KeepRange>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CutState {
     pub id: String,
     pub status: String,
     pub output_path: Option<String>,
     pub error: Option<String>,
+}
+
+fn load_cut(db: &Database, id: &str) -> anyhow::Result<Option<CutState>> {
+    let mut saved = db.get::<CutState>("cut", id)?;
+    if let Some(item) = saved.as_mut()
+        && matches!(item.status.as_str(), "queued" | "running")
+    {
+        item.status = "interrupted".into();
+        item.error = Some("Le serveur a redémarré pendant ce découpage. Relancez Cut.".into());
+    }
+    Ok(saved)
+}
+
+fn lookup_cut(state: &AppState, id: &str) -> AppResult<CutState> {
+    if Uuid::parse_str(id).is_err() {
+        return Err(AppError::NotFound("unknown cut id".into()));
+    }
+    if let Some(item) = cuts().get(id) {
+        return Ok(item.clone());
+    }
+    load_cut(&state.db, id)
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("cut not found".into()))
 }
 
 static CUTS: OnceLock<DashMap<String, CutState>> = OnceLock::new();
@@ -156,7 +180,12 @@ pub async fn create(
         output_path: None,
         error: None,
     };
+    state
+        .db
+        .upsert("cut", &id, &cut)
+        .map_err(AppError::Internal)?;
     cuts().insert(id.clone(), cut.clone());
+    let db = state.db.clone();
     tokio::spawn(async move {
         let result = execute(id.clone(), source, output, request.keep, probe.has_audio).await;
         if let Some(mut entry) = cuts().get_mut(&id) {
@@ -169,6 +198,11 @@ pub async fn create(
                     entry.status = "error".into();
                     entry.error = Some(e);
                 }
+            }
+            let snapshot = entry.clone();
+            drop(entry);
+            if let Err(e) = db.upsert("cut", &id, &snapshot) {
+                tracing::error!(error=%e, "persist cut state failed");
             }
         }
     });
@@ -228,18 +262,18 @@ async fn execute(
     outcome
 }
 
-pub async fn status(Path(id): Path<String>) -> AppResult<Json<CutState>> {
-    cuts()
-        .get(&id)
-        .map(|c| Json(c.clone()))
-        .ok_or_else(|| AppError::NotFound("cut not found in current server session".into()))
+pub async fn status(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<Json<CutState>> {
+    lookup_cut(&state, &id).map(Json)
 }
 
-pub async fn download(Path(id): Path<String>) -> AppResult<Response> {
-    let item = cuts()
-        .get(&id)
-        .map(|v| v.clone())
-        .ok_or_else(|| AppError::NotFound("cut not found in current server session".into()))?;
+pub async fn download(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<Response> {
+    let item = lookup_cut(&state, &id)?;
     if item.status != "done" {
         return Err(AppError::Conflict("cut is not ready".into()));
     }
@@ -269,6 +303,31 @@ pub async fn download(Path(id): Path<String>) -> AppResult<Response> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn persisted_clip_survives_server_cache_reset() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::db::Database::open(&temp.path().join("clips.sqlite")).unwrap();
+        let result = CutState {
+            id: Uuid::new_v4().to_string(),
+            status: "done".into(),
+            output_path: Some("/data/cuts/result.mp4".into()),
+            error: None,
+        };
+        db.upsert("cut", &result.id, &result).unwrap();
+        let restored = load_cut(&db, &result.id).unwrap().unwrap();
+        assert_eq!(restored.status, "done");
+        assert_eq!(restored.output_path, result.output_path);
+        let queued = CutState {
+            status: "running".into(),
+            ..result
+        };
+        db.upsert("cut", &queued.id, &queued).unwrap();
+        assert_eq!(
+            load_cut(&db, &queued.id).unwrap().unwrap().status,
+            "interrupted"
+        );
+    }
+
     #[test]
     fn rejects_overlap_and_bad_bounds() {
         assert!(

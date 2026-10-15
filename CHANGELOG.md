@@ -4,6 +4,16 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-10-15
+
+### Improved
+
+- Preview Cut UI redesigned around an interactive timeline, keyboard I/O marks, sorted kept ranges, retained-duration feedback, and sequential preview of kept intervals.
+- Cut selections and export task ID survive browser refresh; completed exports are recorded in AutoSubs SQLite and recoverable after a server restart.
+- Word-aligned Cloud9 corpus pipeline avoids invoking forced alignment twice and prevents repeated service restart lockouts on temporary STT/aligner outages.
+- Side-by-side evaluation of LosslessCut, Descript and Shotcut editing patterns, with scoped tests.
+
+
 ## [3.6.0] - 2026-10-15
 
 ### Added

@@ -301,6 +301,9 @@ The server-side picker canonicalizes requested paths after symlink resolution an
 
 ### Non-destructive multi-interval cutting
 
+The Cut interface includes an interactive timeline, keyboard **I/O** markers, ordered keep intervals, a sequential preview before export, and automatic recovery of the current selection after a page refresh. The clip status and completed output link survive backend restarts using the existing SQLite database.
+
+
 In the Editor, scrub through the video preview and mark **Start here** and **End here** for each segment, then **Keep this passage**. Add multiple non-overlapping passages and press **Cut**. AutoSubs concatenates the retained sections with frame-accurate FFmpeg trimming and synchronized audio, writes a fresh H.264/AAC MP4 under `/data/cuts`, and provides a download link without changing the original video. Cuts run asynchronously so a long render cannot time out the browser request. The job status is in-memory for the current backend session; output files persist separately.
 
 ### Cloud9 stand-up transcript/search utility
