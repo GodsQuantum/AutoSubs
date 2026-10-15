@@ -4,6 +4,20 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-10-15
+
+### Added
+
+- Non-destructive multi-range video cutter directly in the editor preview: mark start/end, keep ordered fragments, cut asynchronously, download an H.264/AAC MP4 while preserving the original video.
+- Strict duration/overlap validation and output status with server-side single-job concurrency and atomic file publication.
+- Cloud9 stand-up library tool: existing Speaches STT + WhisperX forced-alignment in bounded audio chunks; Markdown, readable SRT and full-resolution word timings as same-stem sidecars.
+- SQLite FTS5 transcript search including original video relative path, absolute occurrence timestamps and resumable per-chunk checkpoints.
+
+### Fixed
+
+- Svelte/TypeScript strict typecheck errors in preview props and settings form rendering.
+
+
 ## [3.5.1] - 2026-10-07
 
 ### Fixed
