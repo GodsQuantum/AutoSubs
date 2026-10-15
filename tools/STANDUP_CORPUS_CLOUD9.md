@@ -15,7 +15,7 @@
 
 ## Service de production sur hôte Cloud9
 
-Processus transitoire initié le 15/10/2026: `autosubs-standup-corpus.service`.
+Service systemd **persistant** activé le 15/10/2026: `autosubs-standup-corpus.service`, lancé au démarrage de Cloud9 et reprenant les chunks validés. Le fichier installé est suivi dans `tools/systemd/autosubs-standup-corpus.service`.
 N'importe quel démarrage ultérieur `run` ignore les vidéos possédant déjà les trois sidecars et reprend les segments enregistrés dans SQLite.
 
 ```bash
