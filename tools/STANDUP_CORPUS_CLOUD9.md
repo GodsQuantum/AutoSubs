@@ -8,7 +8,7 @@
 - Même moteur et aligneur qu'AutoSubs prod: STT Cloud9-Speaches CT410 192.168.1.219:8005 et WhisperX fr CT410 192.168.1.219:8006.
 - L'ASR ne garantit pas les mots prononcés: les erreurs de reconnaissance nécessitent une relecture avant publication. Le forced-alignment fournit de véritables bornes mot par mot quand valide, sinon le fichier n'est pas publié.
 - Sous-titres SRT groupés pour lisibilité, JSON conservant tous les mots/timestamps d'origine, Markdown déterministe avec horodatages et chemin original, pas de LLM réécrivant les propos.
-- Durées absolues de la vidéo source, audio segmenté en 240 secondes, nettoyage audio intermédiaire; reprise SQLite par segment sauvegardé.
+- Durées absolues de la vidéo source, audio segmenté en 90 secondes, nettoyage audio intermédiaire; reprise SQLite par segment sauvegardé.
 - FTS5 insensible aux accents de base, recherche exacte de mots ou séquence de mots (pas recherche sémantique de synonymes).
 - Deux vues/prises contenant un audio similaire sont transcrites séparément, aucun regroupement risqué de captations.
 - Dossier et fichiers de sauvegarde du workflow séparés des médias. Pas de doublon massif de vidéo.
@@ -47,3 +47,6 @@ Ouvrir un job vidéo dans l'Éditeur, cliquer sur «Début ici», puis «Fin ici
 ## Incident 2026-10-15, alignement temporairement indisponible
 
 Après 4 vidéos le service a subi des HTTP 503 par Speaches (alignement distant demandé automatiquement par word-granularity). Le client STT demande désormais le texte seul, puis déclenche **une seule** passe WhisperX pour les mots. Le service système garde un redémarrage lent de 5 min sans blocage permanent (StartLimitIntervalSec=0). Les anciens chunks valides sont réutilisés.
+
+### Robustesse 16 octobre 2026
+Aligner CT410 a redémarré plusieurs fois durant les tranches de 240 s (connexions interrompues). Les nouvelles tranches sont de 90 s; la taille est intégrée à la clé de cache pour éviter tout mélange d’horodatages. Retry limité à trois essais sur les erreurs réseau ou HTTP 429/502/503/504. Les sidecars déjà validés restent inchangés.
