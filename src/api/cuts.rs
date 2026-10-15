@@ -139,9 +139,7 @@ pub async fn create(
     let dir = state.config.data_dir.join("cuts");
     fs::create_dir_all(&dir).await?;
     let id = Uuid::new_v4().to_string();
-    let basename = job
-        .original_name
-        .trim_end_matches(|c: char| c == '.' || c == ' ');
+    let basename = job.original_name.trim_end_matches(['.', ' ']);
     let stem = std::path::Path::new(basename)
         .file_stem()
         .and_then(|v| v.to_str())
@@ -254,7 +252,7 @@ pub async fn download(Path(id): Path<String>) -> AppResult<Response> {
         .file_name()
         .and_then(|v| v.to_str())
         .unwrap_or("cut.mp4");
-    let safe = filename.replace('"', "_").replace('\\', "_");
+    let safe = filename.replace(['"', '\\'], "_");
     let size = reader.metadata().await?.len();
     Response::builder()
         .status(StatusCode::OK)
