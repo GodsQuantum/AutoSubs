@@ -38,7 +38,7 @@ Ouvrir un job vidéo dans l'Éditeur, cliquer sur «Début ici», puis «Fin ici
 ## Tests vérifiés au 15/10/2026
 
 - 240 secondes de captation Paname, 608 mots réels alignés, source non modifiée.
-- Un clip bref réel du dossier Divers a produit .md/.srt/.words.json et un index texte.
+- Un clip bref réel du dossier Divers a produit .md/.srt/.words.json et un index texte (le bruit musical peut provoquer des hallucinations de ponctuation, désormais filtrées).
 - 122 tests unitaires Rust; 37 tests frontend Node; 3 tests Python corpus.
 - `svelte-check`: 0 erreur / 0 avertissement.
 - Deux coupes 1–2 s et 4–6 s d'une source FFmpeg synthétique donnent un MP4 de 3.000 s avec vidéo et audio.

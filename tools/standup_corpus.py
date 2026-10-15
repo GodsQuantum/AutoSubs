@@ -78,8 +78,9 @@ def get_words(segment, start, n, language):
         transcript = multipart({"model": MODEL, "language": language, "response_format": "verbose_json",
                                 "timestamp_granularities[]": "word"}, "clip.wav", sound, STT)
         raw_text = str(transcript.get("text") or "").strip()
-        if not raw_text:
-            # The model may legitimately detect a silent clip; do not fabricate words.
+        if not raw_text or not any(character.isalnum() for character in raw_text):
+            # Silent/music-only clips can hallucinate punctuation ("... ... ...").
+            # Never publish punctuation-only phrases as spoken words.
             return []
         aligned = multipart({"transcript": raw_text, "language": language},
                             "clip.wav", sound, ALIGN)
