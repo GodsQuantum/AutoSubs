@@ -16,6 +16,24 @@ WORDS = [
 ]
 
 class CorpusTests(unittest.TestCase):
+    def test_one_transient_http_503_retries_same_audio_chunk(self):
+        from unittest.mock import patch
+        word={"word":"Bonjour", "start":0.0, "end":0.5}
+        with patch.object(corpus, "get_words", side_effect=[RuntimeError("HTTP 503: temporary"),[word]]) as getter:
+            with patch.object(corpus.time, "sleep") as snooze:
+                result=corpus.get_words_retry("movie", 0, 90, "fr")
+                self.assertEqual(result,[word])
+                self.assertEqual(getter.call_count,2)
+                self.assertEqual(snooze.call_count,1)
+
+    def test_chunk_checkpoint_identity_includes_duration_and_chunk_size(self):
+        # A chunk-size change must not silently reuse cached 240 s timing on 90 s slices.
+        video=corpus.ROOT / "Divers" / "capture.mp4"
+        first=corpus.chunk_identity(video, 100, 123456, 240)
+        second=corpus.chunk_identity(video, 100, 123456, 90)
+        assert first != second
+        assert first == corpus.chunk_identity(video, 100, 123456, 240)
+
     def test_stt_is_transcribed_without_duplicate_word_alignment(self):
         options=corpus.transcription_options("fr")
         self.assertEqual(options["response_format"], "verbose_json")
