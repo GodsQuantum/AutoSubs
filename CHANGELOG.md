@@ -4,6 +4,14 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.6.2] - 2026-10-16
+
+### Fixed
+
+- Non-destructive Cut works for both imported files under configured allowed roots and videos uploaded directly to AutoSubs internal storage; blocks uploads symlink escape to unrelated files.
+- Regression coverage verifies upload, imported media, denied external media and symlink traversal without broadening allowed import roots.
+
+
 ## [3.6.1] - 2026-10-15
 
 ### Improved
