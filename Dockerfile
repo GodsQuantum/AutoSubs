@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:26.10.0-trixie-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1 AS frontend
+FROM node:26.11.1-trixie-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0 AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -10,14 +10,14 @@ COPY .github/workflows/appimage.yml .github/workflows/release.yml /src/.github/w
 COPY packaging/appimage/build.sh /src/packaging/appimage/
 RUN npm run check && npm test && npm run build
 
-FROM rust:1.98.1-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS builder
+FROM rust:1.99.0-trixie@sha256:81015672d6939b0265f09adf96d5de125482bb1330106076956b0518e74edc90 AS builder
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY rust-toolchain.toml ./
 COPY src ./src
 RUN cargo build --release --locked
 
-FROM debian:sid-slim@sha256:ec3fa4e0b2987ae47be353f56854191e300261915470e40165b1c906d22a65db AS runtime
+FROM debian:sid-slim@sha256:1f11c32b03195c1b28c55e4579755659edae5c76dd76a69b4e4fb34c58fa8744 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_HOST=0.0.0.0 \
     AUTOSUBS_PORT=3000 \
