@@ -301,6 +301,8 @@ The server-side picker canonicalizes requested paths after symlink resolution an
 
 ### Non-destructive multi-interval cutting
 
+The cutter handles both allowed server-file imports and original videos uploaded directly to AutoSubs; internal uploads are never exposed as general server browsing roots. Symlink escape is rejected.
+
 The Cut interface includes an interactive timeline, keyboard **I/O** markers, ordered keep intervals, a sequential preview before export, and automatic recovery of the current selection after a page refresh. The clip status and completed output link survive backend restarts using the existing SQLite database.
 
 

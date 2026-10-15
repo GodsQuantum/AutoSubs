@@ -18,7 +18,7 @@ use axum::{
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::{
-    path::PathBuf,
+    path::{Path as FsPath, PathBuf},
     sync::{Arc, OnceLock},
 };
 use tokio::{fs, process::Command, sync::Semaphore};
@@ -139,6 +139,26 @@ fn filter_graph(ranges: &[KeepRange], has_audio: bool) -> String {
     nodes.join(";")
 }
 
+// The job owns its media path. Imported source files are restricted to configured
+// roots; uploaded jobs use only the app's own canonical /data/uploads subtree.
+// Never allow a symlink within uploads to escape that subtree.
+fn resolve_cut_source(config: &crate::config::Config, requested: &FsPath) -> AppResult<PathBuf> {
+    if let Ok(file) = config.resolve_allowed_file(requested) {
+        return Ok(file);
+    }
+    let uploads = std::fs::canonicalize(config.uploads_dir())
+        .map_err(|_| AppError::Forbidden("internal upload storage unavailable".into()))?;
+    let input = std::fs::canonicalize(requested)
+        .map_err(|_| AppError::Forbidden("source video is unavailable".into()))?;
+    if input.is_file() && input.starts_with(uploads) {
+        Ok(input)
+    } else {
+        Err(AppError::Forbidden(
+            "source video is outside allowed roots and internal uploads".into(),
+        ))
+    }
+}
+
 pub async fn create(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
@@ -152,10 +172,7 @@ pub async fn create(
     let source = job
         .input_path
         .ok_or_else(|| AppError::BadRequest("job has no source video".into()))?;
-    let source = state
-        .config
-        .resolve_allowed_file(&source)
-        .map_err(|_| AppError::Forbidden("video outside allowed roots".into()))?;
+    let source = resolve_cut_source(&state.config, &source)?;
     let probe = probe_media(&source, &CancellationToken::new())
         .await
         .map_err(|err| AppError::BadRequest(format!("cannot read source media: {err}")))?;
@@ -303,6 +320,40 @@ pub async fn download(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cutter_accepts_its_own_uploads_but_rejects_path_traversal() {
+        use clap::Parser;
+        let temp = tempfile::tempdir().unwrap();
+        let public = temp.path().join("public");
+        std::fs::create_dir_all(&public).unwrap();
+        let mut config = crate::config::Config::try_parse_from(["autosubs"]).unwrap();
+        config.data_dir = temp.path().join("data");
+        config.config_dir = temp.path().join("config");
+        config.fonts_dir = temp.path().join("fonts");
+        config.allowed_roots = vec![public.clone()];
+        config.init_dirs().unwrap();
+        let upload = config.uploads_dir().join("test-upload.media");
+        std::fs::write(&upload, b"fixture").unwrap();
+        assert_eq!(
+            resolve_cut_source(&config, &upload).unwrap(),
+            upload.canonicalize().unwrap()
+        );
+        let user_file = public.join("user.mp4");
+        std::fs::write(&user_file, b"fixture").unwrap();
+        assert_eq!(
+            resolve_cut_source(&config, &user_file).unwrap(),
+            user_file.canonicalize().unwrap()
+        );
+        let outside = temp.path().join("private.mp4");
+        std::fs::write(&outside, b"forbidden").unwrap();
+        assert!(resolve_cut_source(&config, &outside).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, config.uploads_dir().join("escape.mp4")).unwrap();
+            assert!(resolve_cut_source(&config, &config.uploads_dir().join("escape.mp4")).is_err());
+        }
+    }
+
     #[test]
     fn persisted_clip_survives_server_cache_reset() {
         let temp = tempfile::tempdir().unwrap();
