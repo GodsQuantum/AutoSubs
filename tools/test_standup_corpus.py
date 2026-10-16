@@ -16,6 +16,31 @@ WORDS = [
 ]
 
 class CorpusTests(unittest.TestCase):
+    def test_500_stt_fallback_only_accepts_silero_confirmed_silence(self):
+        from unittest.mock import patch
+        with patch.object(corpus, 'multipart', side_effect=[
+            RuntimeError(f'{corpus.STT}: HTTP 500: Internal Server Error'), []]) as call:
+            self.assertIsNone(corpus.transcribe_text_or_silence(b'valid-WAV', 'fr'))
+            self.assertEqual(call.call_count, 2)
+            self.assertTrue(call.call_args.args[3].endswith('/v1/audio/speech/timestamps'))
+
+    def test_500_stt_with_detected_speech_must_not_be_silently_discarded(self):
+        from unittest.mock import patch
+        with patch.object(corpus, 'multipart', side_effect=[
+            RuntimeError(f'{corpus.STT}: HTTP 500: Internal Server Error'),
+            [{'start':1000,'end':2000}] ]):
+            with self.assertRaisesRegex(RuntimeError, 'HTTP 500'):
+                corpus.transcribe_text_or_silence(b'valid-WAV', 'fr')
+
+    def test_transient_500_retries_without_discarding_audio(self):
+        from unittest.mock import patch
+        with patch.object(corpus, 'get_words', side_effect=[
+            RuntimeError('HTTP 500'), [{'word':'bonjour','start':0,'end':.1}]]) as call:
+            with patch.object(corpus.time,'sleep') as sleep:
+                assert len(corpus.get_words_retry('video',0,90,'fr'))==1
+                self.assertEqual(call.call_count,2)
+                self.assertEqual(sleep.call_count,1)
+
     def test_one_transient_http_503_retries_same_audio_chunk(self):
         from unittest.mock import patch
         word={"word":"Bonjour", "start":0.0, "end":0.5}
