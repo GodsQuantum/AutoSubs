@@ -50,3 +50,7 @@ Après 4 vidéos le service a subi des HTTP 503 par Speaches (alignement distant
 
 ### Robustesse 16 octobre 2026
 Aligner CT410 a redémarré plusieurs fois durant les tranches de 240 s (connexions interrompues). Les nouvelles tranches sont de 90 s; la taille est intégrée à la clé de cache pour éviter tout mélange d’horodatages. Retry limité à trois essais sur les erreurs réseau ou HTTP 429/502/503/504. Les sidecars déjà validés restent inchangés.
+
+## Correction du 16 octobre 2026 : silences et modèle anglais
+
+Lorsqu'un HTTP 500 de Speaches est dû à une absence de parole, on vérifie explicitement le résultat Silero sur `/v1/audio/speech/timestamps`. Seule une liste vide autorise un segment vide. Si Silero voit des paroles, la requête échoue et peut être relancée ; aucun silence n'est inventé. Le modèle anglais Torchaudio wav2vec2 (377664473 octets) est désormais présent dans le cache existant de l'aligneur Cloud9, sans modification des montages. Le test d'alignement d'un extrait anglais réel a réussi.

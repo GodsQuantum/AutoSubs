@@ -24,6 +24,7 @@ TMP_HOST = Path("/srv/lxc/travail/appdata/autosubs/data/work/standup_corpus")
 TMP_CONTAINER = "/data/work/standup_corpus"
 STT = "http://192.168.1.219:8005/v1/audio/transcriptions"
 ALIGN = "http://192.168.1.219:8006/align"
+VAD = "http://192.168.1.219:8005/v1/audio/speech/timestamps"
 MODEL = "deepdml/faster-whisper-large-v3-turbo-ct2"
 EXTS = {".mp4", ".mkv", ".mov", ".m4v", ".avi", ".webm"}
 CHUNK_SECONDS = 90
@@ -71,6 +72,25 @@ def transcription_options(language):
     # if it is briefly down. Align exactly once, explicitly, after STT.
     return {"model": MODEL, "language": language, "response_format": "verbose_json"}
 
+def transcribe_text_or_silence(sound, language):
+    try:
+        return multipart(transcription_options(language), "clip.wav", sound, STT)
+    except RuntimeError as exc:
+        # Speaches 0.4.0 currently turns a Silero VAD empty-segment list into
+        # faster-whisper RuntimeError("No clip timestamps found"), exposed as 500.
+        # Never silently discard a real STT error: explicitly ask the same VAD.
+        if f"{STT}: HTTP 500" not in str(exc):
+            raise
+        speech = multipart({"model": "silero_vad_v5", "threshold": "0.5",
+                            "min_silence_duration_ms": "2000", "speech_pad_ms": "400"},
+                           "clip.wav", sound, VAD, timeout=120)
+        if not isinstance(speech, list):
+            raise RuntimeError("Silero VAD did not return a list of speech intervals") from exc
+        if speech:
+            raise
+        print("NO_SPEECH Silero confirmed this audio chunk has no speech", flush=True)
+        return None
+
 def chunk_identity(video, size, mtime_ns, seconds=CHUNK_SECONDS):
     return f"{video.resolve()}:{size}:{mtime_ns}:chunks={seconds}"
 
@@ -80,7 +100,7 @@ def get_words_retry(video, start, n, language, attempts=3):
             return get_words(video, start, n, language)
         except (RuntimeError, urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
             temporary = any(token in str(exc).lower() for token in (
-                "503", "502", "504", "429", "timed out", "timeout", "connection", "remote end closed", "unavailable"))
+                "500", "503", "502", "504", "429", "timed out", "timeout", "connection", "remote end closed", "unavailable"))
             if not temporary or try_number == attempts-1:
                 raise
             print(f"RETRY audio chunk at {start:.1f}s ({try_number+1}/{attempts}), {type(exc).__name__}: {exc}", flush=True)
@@ -95,7 +115,9 @@ def get_words(segment, start, n, language):
                    "-ss", f"{start:.3f}", "-i", source, "-t", f"{n:.3f}", "-vn",
                    "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", clip_docker, timeout=180)
         sound = clip_host.read_bytes()
-        transcript = multipart(transcription_options(language), "clip.wav", sound, STT)
+        transcript = transcribe_text_or_silence(sound, language)
+        if transcript is None:
+            return []
         raw_text = str(transcript.get("text") or "").strip()
         if not raw_text or not any(character.isalnum() for character in raw_text):
             # Silent/music-only clips can hallucinate punctuation ("... ... ...").
