@@ -20,6 +20,7 @@ pub struct SettingsView {
     local_transcription_model: String,
     local_transcription_api_key_set: bool,
     alignment_enabled: bool,
+    alignment_required: bool,
     alignment_url: String,
     alignment_model: String,
     alignment_api_key_set: bool,
@@ -43,6 +44,7 @@ impl From<&Settings> for SettingsView {
             local_transcription_model: s.local_transcription_model.clone(),
             local_transcription_api_key_set: !s.local_transcription_api_key.is_empty(),
             alignment_enabled: s.alignment_enabled,
+            alignment_required: s.alignment_required,
             alignment_url: s.alignment_url.clone(),
             alignment_model: s.alignment_model.clone(),
             alignment_api_key_set: !s.alignment_api_key.is_empty(),
@@ -98,6 +100,7 @@ pub struct SettingsUpdate {
     #[serde(default)]
     local_transcription_api_key: Option<SecretPatch>,
     alignment_enabled: bool,
+    alignment_required: bool,
     alignment_url: String,
     alignment_model: String,
     #[serde(default)]
@@ -127,6 +130,7 @@ pub async fn update_settings(
     settings.local_transcription_url = body.local_transcription_url;
     settings.local_transcription_model = body.local_transcription_model;
     settings.alignment_enabled = body.alignment_enabled;
+    settings.alignment_required = body.alignment_required;
     settings.alignment_url = body.alignment_url;
     settings.alignment_model = body.alignment_model;
     settings.llm_enabled = body.llm_enabled;

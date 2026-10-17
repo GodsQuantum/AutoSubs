@@ -499,8 +499,7 @@ fn default_lang() -> String {
     std::env::var("AUTOSUBS_TRANSCRIPTION_LANGUAGE").unwrap_or_else(|_| "fr".into())
 }
 fn default_alignment_model() -> String {
-    std::env::var("AUTOSUBS_ALIGNMENT_MODEL")
-        .unwrap_or_else(|_| "facebook/wav2vec2-large-xlsr-53-french".into())
+    std::env::var("AUTOSUBS_ALIGNMENT_MODEL").unwrap_or_default()
 }
 fn default_llm_prompt() -> String {
     "Corrige uniquement l'orthographe, la grammaire et la ponctuation. Garde exactement le même nombre de blocs et leur ordre. Renvoie uniquement les blocs corrigés, un par ligne.".into()
@@ -529,6 +528,8 @@ pub struct Settings {
     pub local_transcription_model: String,
     #[serde(default)]
     pub alignment_enabled: bool,
+    #[serde(default = "default_true")]
+    pub alignment_required: bool,
     #[serde(default)]
     pub alignment_url: String,
     #[serde(default)]
@@ -576,6 +577,7 @@ impl Default for Settings {
             alignment_enabled: std::env::var("AUTOSUBS_ALIGNMENT_ENABLED")
                 .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
                 .unwrap_or(false),
+            alignment_required: true,
             alignment_url: std::env::var("AUTOSUBS_ALIGNMENT_URL").unwrap_or_default(),
             alignment_api_key: std::env::var("AUTOSUBS_ALIGNMENT_API_KEY").unwrap_or_default(),
             alignment_model: default_alignment_model(),

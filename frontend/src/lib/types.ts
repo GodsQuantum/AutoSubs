@@ -31,7 +31,7 @@ export interface Encoder { kind:EncoderKind; quality:number; preset:string }
 export interface SettingsView {
   transcriptionUrl:string; transcriptionModel:string; transcriptionApiKeySet:boolean; language:string;
   localTranscriptionEnabled:boolean; localFallbackEnabled:boolean; localTranscriptionUrl:string; localTranscriptionModel:string; localTranscriptionApiKeySet:boolean;
-  alignmentEnabled:boolean; alignmentUrl:string; alignmentModel:string; alignmentApiKeySet:boolean;
+  alignmentEnabled:boolean; alignmentRequired:boolean; alignmentUrl:string; alignmentModel:string; alignmentApiKeySet:boolean;
   llmEnabled:boolean; llmEndpoint:string; llmModel:string; llmPrompt:string; llmApiKeySet:boolean; encoder:Encoder;
 }
 export interface Asset { id:string; name:string; storedFile:string; mime:string; size:number; createdAtMs:number }
