@@ -6,11 +6,11 @@
   export let refresh:()=>Promise<void>=async()=>{}; export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
   let draft:SettingsView|undefined; let loaded:SettingsView|undefined;
   $: form = draft as SettingsView;
-  let transKey='';let transAction:'keep'|'replace'|'clear'='keep';let localKey='';let localAction:'keep'|'replace'|'clear'='keep';let llmKey='';let llmAction:'keep'|'replace'|'clear'='keep';
+  let transKey='';let transAction:'keep'|'replace'|'clear'='keep';let localKey='';let localAction:'keep'|'replace'|'clear'='keep';let alignKey='';let alignAction:'keep'|'replace'|'clear'='keep';let llmKey='';let llmAction:'keep'|'replace'|'clear'='keep';
   let saving=false;let primaryModels:string[]=[];let localModels:string[]=[];
-  $: if(settings&&settings!==loaded){loaded=settings;draft=JSON.parse(JSON.stringify(settings));transKey='';localKey='';llmKey='';transAction=localAction=llmAction='keep'}
+  $: if(settings&&settings!==loaded){loaded=settings;draft=JSON.parse(JSON.stringify(settings));transKey='';localKey='';llmKey='';alignKey='';transAction=localAction=llmAction=alignAction='keep'}
   const secret=(action:string,value:string)=>action==='keep'?undefined:{action,value};
-  async function save(){if(!draft)return;saving=true;try{await api.saveSettings({...draft,transcriptionApiKey:secret(transAction,transKey),localTranscriptionApiKey:secret(localAction,localKey),llmApiKey:secret(llmAction,llmKey)});await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}finally{saving=false}}
+  async function save(){if(!draft)return;saving=true;try{await api.saveSettings({...draft,transcriptionApiKey:secret(transAction,transKey),localTranscriptionApiKey:secret(localAction,localKey),alignmentApiKey:secret(alignAction,alignKey),llmApiKey:secret(llmAction,llmKey)});await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}finally{saving=false}}
   async function models(kind:'primary'|'local'){if(!draft)return;try{const endpoint=kind==='primary'?draft.transcriptionUrl:draft.localTranscriptionUrl;const key=kind==='primary'?transKey:localKey;const result=await api.models(endpoint,key);if(kind==='primary')primaryModels=result.models;else localModels=result.models}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
   const yes=(v:boolean|undefined)=>v?$dictionary.available:$dictionary.unavailable;
   const encoderName=(kind:EncoderKind|undefined)=>{
@@ -39,6 +39,15 @@
       <div class="field"><label for="settings-field-6">{$dictionary.model}</label><input id="settings-field-6" class="input" list="local-models" bind:value={form.localTranscriptionModel}/><datalist id="local-models">{#each localModels as m}<option value={m}></option>{/each}</datalist></div>
       <div class="field"><label for="settings-field-7">{$dictionary.apiKey} {form.localTranscriptionApiKeySet?`· ${$dictionary.keyStored}`:''}</label><div class="row"><select id="settings-field-7" class="select" style="max-width:150px" bind:value={localAction}><option value="keep">{$dictionary.keepKey}</option><option value="replace">{$dictionary.replaceKey}</option><option value="clear">{$dictionary.clearKey}</option></select><input class="input" type="password" aria-label={$dictionary.apiKey} disabled={localAction!=='replace'} bind:value={localKey}/></div></div>
       <button class="btn" disabled={!form.localTranscriptionUrl} on:click={()=>models('local')}>{$dictionary.testModels}</button>
+    </div></section>
+
+    <section class="card"><div class="card-header"><strong>Acoustic word alignment · FR / EN / ZH</strong></div><div class="card-body stack">
+      <label class="check"><input type="checkbox" bind:checked={form.alignmentEnabled}/> Acoustic alignment for every ASR provider/model</label>
+      <label class="check"><input type="checkbox" bind:checked={form.alignmentRequired} disabled={!form.alignmentEnabled}/> Strict: stop if acoustic word alignment is unavailable or invalid; never silently substitute interpolated timestamps</label>
+      <div class="field"><label for="alignment-url">Word aligner endpoint</label><input id="alignment-url" class="input" bind:value={form.alignmentUrl} placeholder="http://aligner:8006/align"/></div>
+      <div class="field"><label for="alignment-model">Alignment model (optional)</label><input id="alignment-model" class="input" bind:value={form.alignmentModel} placeholder="Automatic for chosen language (recommended)"/><span class="help">Leave blank to select the alignment model for the audio language; set transcription language to fr, en, or zh.</span></div>
+      <div class="field"><label for="alignment-key">Aligner API key {form.alignmentApiKeySet?'· stored':''}</label><div class="row"><select id="alignment-key" class="select" style="max-width:150px" bind:value={alignAction}><option value="keep">Keep</option><option value="replace">Replace</option><option value="clear">Clear</option></select><input type="password" class="input" aria-label="Alignment API key" disabled={alignAction!=='replace'} bind:value={alignKey}/></div></div>
+      <span class="help">Word timestamps are measured against the actual audio. Low-confidence alignments still need review; their presence alone does not prove millisecond accuracy. Chinese is aligned at character/token level when its ASR returns unspaced text.</span>
     </div></section>
 
     <section class="card"><div class="card-header"><strong>{$dictionary.llm}</strong></div><div class="card-body stack">

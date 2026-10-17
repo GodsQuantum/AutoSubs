@@ -266,6 +266,41 @@ fn raw_words(transcription: &TranscriptionResponse) -> Vec<SubtitleWord> {
     fix_tokenization(raw_words_with_quality(transcription).0)
 }
 
+fn is_cjk_ideograph(c: char) -> bool {
+    matches!(c as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0x20000..=0x2A6DF | 0x2A700..=0x2B73F)
+}
+
+// Preserve Latin word runs; split unspaced Han text into acoustically alignable
+// characters, not a fictitious single 5-second "word". Lexical segmentation
+// is language-dependent and must not be inferred from whitespace alone.
+fn spoken_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    for piece in text.split_whitespace() {
+        let mut buf = String::new();
+        for ch in piece.chars() {
+            if is_cjk_ideograph(ch) {
+                if !buf.is_empty() {
+                    tokens.push(std::mem::take(&mut buf));
+                }
+                tokens.push(ch.to_string());
+            } else if matches!(ch, '，' | '。' | '！' | '？' | '、' | '；' | '：') {
+                if !buf.is_empty() {
+                    tokens.push(std::mem::take(&mut buf));
+                }
+                if let Some(last) = tokens.last_mut() {
+                    last.push(ch);
+                }
+            } else {
+                buf.push(ch);
+            }
+        }
+        if !buf.is_empty() {
+            tokens.push(buf);
+        }
+    }
+    tokens
+}
+
 fn raw_words_with_quality(
     transcription: &TranscriptionResponse,
 ) -> (Vec<SubtitleWord>, TimingQuality) {
@@ -283,7 +318,7 @@ fn raw_words_with_quality(
                 continue;
             }
             if let Some(text) = &segment.text {
-                let tokens: Vec<&str> = text.split_whitespace().collect();
+                let tokens = spoken_tokens(text);
                 if tokens.is_empty() {
                     continue;
                 }
@@ -301,7 +336,7 @@ fn raw_words_with_quality(
                         cursor + duration
                     };
                     result.push(SubtitleWord {
-                        word: (*token).into(),
+                        word: token.clone(),
                         start: cursor,
                         end: token_end,
                     });
@@ -314,10 +349,10 @@ fn raw_words_with_quality(
         && let Some(text) = &transcription.text
     {
         let mut cursor = 0.0;
-        for token in text.split_whitespace() {
+        for token in spoken_tokens(text) {
             exact = false;
             result.push(SubtitleWord {
-                word: token.into(),
+                word: token,
                 start: cursor,
                 end: cursor + 0.4,
             });
@@ -339,7 +374,7 @@ fn append_raw_words(out: &mut Vec<SubtitleWord>, words: &[RawWord], exact: &mut 
             continue;
         }
         let (start, end) = match (word.start, word.end) {
-            (Some(start), Some(end)) if start.is_finite() && end.is_finite() && end >= start => {
+            (Some(start), Some(end)) if start.is_finite() && end.is_finite() && end > start => {
                 (start, end)
             }
             _ => {
@@ -619,6 +654,23 @@ mod tests {
                     .collect(),
             ),
         }
+    }
+
+    #[test]
+    fn chinese_unspaced_transcript_is_not_treated_as_one_word() {
+        assert_eq!(spoken_tokens("你好世界。"), vec!["你", "好", "世", "界。"]);
+        assert_eq!(
+            spoken_tokens("你好 OpenAI 世界"),
+            vec!["你", "好", "OpenAI", "世", "界"]
+        );
+        let text = TranscriptionResponse {
+            text: Some("你好世界。".into()),
+            words: None,
+            segments: None,
+        };
+        let timeline = transcript_timeline(&text);
+        assert_eq!(timeline.words.len(), 4);
+        assert_eq!(timeline.timing_quality, TimingQuality::Inferred);
     }
 
     #[test]

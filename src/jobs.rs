@@ -2,7 +2,7 @@ use crate::domain::{
     Asset, Brand, Job, JobOutro, JobStatus, Preset, RawWord, RenderProfile, SubtitleLine,
     TimingQuality, TranscriptTimeline, TranscriptionResponse, Workflow, WorkflowOutput,
 };
-use crate::media::align::{align_timeline, timeline_as_transcription};
+use crate::media::align::{align_timeline_with_segments, timeline_as_transcription};
 use crate::media::process::ProcessError;
 use crate::media::transcribe::{TranscriptionError, extract_audio, transcribe_audio};
 use crate::media::{build_render_plan, probe_media, render_video, resolve_render_policy};
@@ -283,11 +283,26 @@ async fn prepare_job(
             }
         };
         let native_timeline = transcript_timeline(&transcription);
-        let alignment =
-            align_timeline(&audio, &native_timeline, &settings, &state.http, token).await;
+        let alignment = align_timeline_with_segments(
+            &audio,
+            &native_timeline,
+            transcription.segments.as_deref(),
+            &settings,
+            &state.http,
+            token,
+        )
+        .await;
         let _ = tokio::fs::remove_file(&audio).await;
         if token.is_cancelled() {
             bail!("cancelled");
+        }
+        if settings.alignment_enabled && settings.alignment_required {
+            if let Some(reason) = &alignment.fallback_reason {
+                bail!("strict acoustic word alignment failed: {reason}");
+            }
+            if alignment.timeline.timing_quality != TimingQuality::Aligned {
+                bail!("strict acoustic word alignment required but was not obtained");
+            }
         }
         let timing_fallback = alignment.fallback_reason.clone();
         persist_transcript(state, id, &alignment.timeline)?;
