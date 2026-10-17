@@ -7,7 +7,8 @@ use tokio::fs::File;
 use tokio_util::{io::ReaderStream, sync::CancellationToken};
 
 use crate::domain::{
-    RawWord, Settings, SubtitleWord, TimingQuality, TranscriptTimeline, TranscriptionResponse,
+    RawSegment, RawWord, Settings, SubtitleWord, TimingQuality, TranscriptTimeline,
+    TranscriptionResponse,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,6 +36,10 @@ fn lexical_key(value: &str) -> String {
 }
 
 fn timeline_bounds(timeline: &TranscriptTimeline) -> Option<(f64, f64)> {
+    // Interpolated text-only timestamps do not represent the media duration.
+    if timeline.timing_quality == TimingQuality::Inferred {
+        return None;
+    }
     let start = timeline.words.first()?.start;
     let end = timeline.words.last()?.end;
     (start.is_finite() && end.is_finite() && end > start).then_some((start, end))
@@ -93,21 +98,42 @@ pub fn timeline_as_transcription(timeline: &TranscriptTimeline) -> Transcription
     }
 }
 
+fn fold_punctuation(native: &[SubtitleWord]) -> Vec<SubtitleWord> {
+    let mut words: Vec<SubtitleWord> = Vec::new();
+    let mut leading = String::new();
+    for word in native {
+        if word.word.chars().any(char::is_alphanumeric) {
+            let mut next = word.clone();
+            if !leading.is_empty() {
+                next.word = format!("{}{}", leading, next.word);
+                leading.clear();
+            }
+            words.push(next);
+        } else if let Some(previous) = words.last_mut() {
+            previous.word.push_str(&word.word);
+        } else {
+            leading.push_str(&word.word);
+        }
+    }
+    words
+}
+
 pub fn validate_aligned_words(
     native: &TranscriptTimeline,
     aligned: Vec<SubtitleWord>,
 ) -> Result<TranscriptTimeline> {
-    if native.words.len() != aligned.len() {
+    let spoken = fold_punctuation(&native.words);
+    if spoken.len() != aligned.len() {
         bail!(
             "alignment word count mismatch: native={} aligned={}",
-            native.words.len(),
+            spoken.len(),
             aligned.len()
         );
     }
 
     let mut previous_end = 0.0_f64;
-    let mut out = Vec::with_capacity(native.words.len());
-    for (index, (native_word, aligned_word)) in native.words.iter().zip(aligned).enumerate() {
+    let mut out = Vec::with_capacity(spoken.len());
+    for (index, (native_word, aligned_word)) in spoken.iter().zip(aligned).enumerate() {
         if lexical_key(&native_word.word) != lexical_key(&aligned_word.word) {
             bail!(
                 "alignment lexical mismatch at word {}: {:?} vs {:?}",
@@ -123,7 +149,11 @@ pub fn validate_aligned_words(
         {
             bail!("invalid alignment boundary at word {index}");
         }
-        if index > 0 && aligned_word.start < previous_end {
+        // WhisperX CTC operates in approximately 20 ms frames. Adjacent
+        // words (especially punctuation-only tokens) can overlap by one frame.
+        // Keep the acoustic boundaries unchanged; reject genuine overlaps.
+        const CTC_FRAME_TOLERANCE_SECS: f64 = 0.04;
+        if index > 0 && aligned_word.start + CTC_FRAME_TOLERANCE_SECS < previous_end {
             bail!("non-monotonic alignment at word {index}");
         }
         previous_end = aligned_word.end;
@@ -140,9 +170,25 @@ pub fn validate_aligned_words(
     })
 }
 
+fn alignment_segments_json(segments: Option<&[RawSegment]>) -> Option<String> {
+    let rows: Vec<serde_json::Value> = segments?
+        .iter()
+        .filter_map(|row| {
+            Some(serde_json::json!({
+                "start": row.start?,
+                "end": row.end?,
+                "text": row.text.as_deref()?.trim(),
+            }))
+        })
+        .filter(|row| row["text"].as_str().is_some_and(|value| !value.is_empty()))
+        .collect();
+    (!rows.is_empty()).then(|| serde_json::Value::Array(rows).to_string())
+}
+
 async fn request_http_alignment(
     audio: &Path,
     native: &TranscriptTimeline,
+    segments: Option<&[RawSegment]>,
     settings: &Settings,
     client: &Client,
     token: &CancellationToken,
@@ -174,6 +220,9 @@ async fn request_http_alignment(
     if !settings.alignment_model.trim().is_empty() {
         form = form.text("model", settings.alignment_model.clone());
     }
+    if let Some(payload) = alignment_segments_json(segments) {
+        form = form.text("segments_json", payload);
+    }
 
     let mut request = client.post(settings.alignment_url.trim()).multipart(form);
     if !settings.alignment_api_key.trim().is_empty() {
@@ -202,6 +251,17 @@ pub async fn align_timeline(
     client: &Client,
     token: &CancellationToken,
 ) -> AlignmentOutcome {
+    align_timeline_with_segments(audio, native, None, settings, client, token).await
+}
+
+pub async fn align_timeline_with_segments(
+    audio: &Path,
+    native: &TranscriptTimeline,
+    segments: Option<&[RawSegment]>,
+    settings: &Settings,
+    client: &Client,
+    token: &CancellationToken,
+) -> AlignmentOutcome {
     if !settings.alignment_enabled
         || settings.alignment_url.trim().is_empty()
         || native.words.is_empty()
@@ -213,7 +273,7 @@ pub async fn align_timeline(
         return AlignmentOutcome::native(native, true, Some("alignment cancelled".into()));
     }
 
-    match request_http_alignment(audio, native, settings, client, token).await {
+    match request_http_alignment(audio, native, segments, settings, client, token).await {
         Ok(words) => match validate_aligned_words(native, words) {
             Ok(timeline) => AlignmentOutcome {
                 timeline,
@@ -257,8 +317,34 @@ mod tests {
     }
 
     #[test]
+    fn alignment_carries_source_segments() {
+        let segments = vec![
+            RawSegment {
+                start: Some(0.0),
+                end: Some(34.0),
+                text: Some("Bonjour les amis".to_owned()),
+                words: None,
+            },
+            RawSegment {
+                start: Some(33.0),
+                end: Some(62.0),
+                text: Some("Nous sommes ici".to_owned()),
+                words: None,
+            },
+        ];
+        let raw = alignment_segments_json(Some(&segments)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value[0]["end"], 34.0);
+        assert_eq!(value[1]["start"], 33.0);
+        assert!(alignment_segments_json(None).is_none());
+    }
+
+    #[test]
     fn canonical_timeline_bounds_cover_first_to_last_word() {
         assert_eq!(timeline_bounds(&native()), Some((0.10, 0.80)));
+        let mut inferred = native();
+        inferred.timing_quality = TimingQuality::Inferred;
+        assert_eq!(timeline_bounds(&inferred), None);
     }
 
     #[test]
@@ -280,6 +366,53 @@ mod tests {
         assert_eq!(result.words[0].start, 0.12);
         assert_eq!(result.words[1].end, 0.86);
         assert_eq!(result.timing_quality, crate::domain::TimingQuality::Aligned);
+    }
+
+    #[test]
+    fn punctuation_only_tokens_do_not_get_fake_acoustic_timestamps() {
+        let mut timeline = native();
+        timeline.words.insert(
+            1,
+            SubtitleWord {
+                word: "?".into(),
+                start: 0.40,
+                end: 0.41,
+            },
+        );
+        let aligned = vec![
+            SubtitleWord {
+                word: "Bonjour?".into(),
+                start: 0.10,
+                end: 0.42,
+            },
+            SubtitleWord {
+                word: "Jordan".into(),
+                start: 0.42,
+                end: 0.80,
+            },
+        ];
+        let result = validate_aligned_words(&timeline, aligned).unwrap();
+        assert_eq!(result.words.len(), 2);
+        assert_eq!(result.words[0].word, "Bonjour,?");
+    }
+
+    #[test]
+    fn adjacent_acoustic_frames_may_overlap_by_20ms_without_retiming() {
+        let aligned = vec![
+            SubtitleWord {
+                word: "Bonjour".into(),
+                start: 0.10,
+                end: 0.42,
+            },
+            SubtitleWord {
+                word: "Jordan".into(),
+                start: 0.40,
+                end: 0.80,
+            },
+        ];
+        let words = validate_aligned_words(&native(), aligned).unwrap().words;
+        assert_eq!(words[0].end, 0.42);
+        assert_eq!(words[1].start, 0.40);
     }
 
     #[test]
