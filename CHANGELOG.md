@@ -4,6 +4,14 @@ All notable released changes are documented here. AutoSubs follows semantic vers
 
 ## [Unreleased]
 
+## [3.6.3] - 2026-10-18
+
+### Added
+
+- Strict long-form acoustic alignment with selectable GPU ASR, acoustic token reconciliation and guarded word timestamps.
+- Compatibility with the integrated Cloud9-Speaches native FastConformer Vulkan alignment endpoint.
+
+
 ## [3.6.2] - 2026-10-16
 
 ### Fixed
