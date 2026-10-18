@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '$lib/api';
   import { dictionary } from '$lib/i18n';
+  import { probeSpeaches } from '$lib/speaches-discovery.js';
   import type { Capabilities, EncoderKind, SettingsView } from '$lib/types';
   export let settings:SettingsView|undefined; export let capabilities:Capabilities|undefined;
   export let refresh:()=>Promise<void>=async()=>{}; export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
@@ -8,6 +9,43 @@
   $: form = draft as SettingsView;
   let transKey='';let transAction:'keep'|'replace'|'clear'='keep';let localKey='';let localAction:'keep'|'replace'|'clear'='keep';let alignKey='';let alignAction:'keep'|'replace'|'clear'='keep';let llmKey='';let llmAction:'keep'|'replace'|'clear'='keep';
   let saving=false;let primaryModels:string[]=[];let localModels:string[]=[];
+  let speachesAddress = 'http://127.0.0.1:8005';
+  let speachesBusy = false;
+  let speachesPrevious: SettingsView | undefined;
+  async function connectSpeaches() {
+    if (!loaded || speachesBusy) return;
+    speachesBusy = true;
+    try {
+      const found = await probeSpeaches(speachesAddress);
+      const previous: SettingsView = JSON.parse(JSON.stringify(loaded));
+      const next: SettingsView = {
+        ...previous, localTranscriptionEnabled: true, localFallbackEnabled: true,
+        localTranscriptionUrl: found.transcriptionUrl,
+        localTranscriptionModel: found.model,
+        alignmentEnabled: true, alignmentRequired: true,
+        alignmentUrl: found.alignmentUrl, alignmentModel: found.alignmentModel
+      };
+      // Preserve all secret keys and the existing primary/OmniRoute provider.
+      await api.saveSettings(next);
+      speachesPrevious = previous;
+      await refresh();
+      notify('success', 'Cloud9-Speaches connected: ' + found.model + ' / ' + found.backend + ' (configured backend).');
+    } catch (error) {
+      notify('error', error instanceof Error ? error.message : String(error));
+    } finally { speachesBusy = false; }
+  }
+  async function undoSpeaches() {
+    if (!speachesPrevious || speachesBusy) return;
+    speachesBusy = true;
+    try {
+      await api.saveSettings(speachesPrevious);
+      speachesPrevious = undefined;
+      await refresh();
+      notify('success', 'Previous transcription and alignment settings restored.');
+    } catch (error) {
+      notify('error', error instanceof Error ? error.message : String(error));
+    } finally { speachesBusy = false; }
+  }
   $: if(settings&&settings!==loaded){loaded=settings;draft=JSON.parse(JSON.stringify(settings));transKey='';localKey='';llmKey='';alignKey='';transAction=localAction=llmAction=alignAction='keep'}
   const secret=(action:string,value:string)=>action==='keep'?undefined:{action,value};
   async function save(){if(!draft)return;saving=true;try{await api.saveSettings({...draft,transcriptionApiKey:secret(transAction,transKey),localTranscriptionApiKey:secret(localAction,localKey),alignmentApiKey:secret(alignAction,alignKey),llmApiKey:secret(llmAction,llmKey)});await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}finally{saving=false}}
@@ -26,6 +64,15 @@
   <div class="page-head"><div><h1 class="page-title">{$dictionary.settings}</h1><p class="page-kicker">{$dictionary.settingsInfo}</p></div><div class="page-actions"><button class="btn primary" disabled={!draft||saving} on:click={save}>{saving?$dictionary.saving:$dictionary.save}</button></div></div>
   {#if !draft}<div class="empty">{$dictionary.loading}</div>{:else}
   <div class="grid two">
+    <section class="card"><div class="card-header"><strong>Connect to Cloud9-Speaches</strong></div>
+      <div class="card-body stack">
+        <p class="help">Connect an existing local or private-LAN Cloud9-Speaches instance. Probe model and FastConformer availability before changing settings. Existing primary provider and API keys are preserved.</p>
+        <div class="field"><label for="speaches-connect-base">Cloud9-Speaches server URL</label><input id="speaches-connect-base" class="input" bind:value={speachesAddress} placeholder="http://127.0.0.1:8005"/></div>
+        <div class="row wrap"><button class="btn primary" disabled={!loaded||speachesBusy} on:click={connectSpeaches}>{speachesBusy ? 'Checking…' : 'Connect Cloud9-Speaches'}</button>
+          {#if speachesPrevious}<button class="btn" disabled={speachesBusy} on:click={undoSpeaches}>Undo connection</button>{/if}</div>
+        <p class="help">Uses local fallback Turbo GGUF and strict measured-word alignment. For a Docker deployment on another machine, enter its reachable private-LAN HTTPS/HTTP address.</p>
+      </div>
+    </section>
     <section class="card"><div class="card-header"><strong>{$dictionary.primaryProvider}</strong></div><div class="card-body stack">
       <div class="field"><label for="settings-field-1">{$dictionary.endpoint}</label><input id="settings-field-1" class="input" bind:value={form.transcriptionUrl} placeholder="https://…/v1/audio/transcriptions"/></div>
       <div class="grid two"><div class="field"><label for="settings-field-2">{$dictionary.model}</label><input id="settings-field-2" class="input" list="primary-models" bind:value={form.transcriptionModel}/><datalist id="primary-models">{#each primaryModels as m}<option value={m}></option>{/each}</datalist></div><div class="field"><label for="settings-field-3">{$dictionary.transcriptionLanguage}</label><input id="settings-field-3" class="input" bind:value={form.language} placeholder="fr"/></div></div>
