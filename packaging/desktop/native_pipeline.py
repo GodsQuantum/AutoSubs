@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from pathlib import Path
 
@@ -76,7 +77,13 @@ def main() -> None:
             run(binary,"--check-install",env=env)
             run(binary,"--smoke",env=env)
             run(installed/"Uninstall.exe","/S")
-            assert not binary.exists(), "NSIS silent uninstall did not remove launcher"
+            # NSIS invokes an uninstaller copy from %TEMP%. The outer process
+            # can return before the actual removal process finishes.
+            for _ in range(120):
+                if not binary.exists():
+                    break
+                time.sleep(0.25)
+            assert not binary.exists(), "NSIS uninstall did not remove launcher after 30s"
             print("WINDOWS_NSIS_INSTALL_UNINSTALL_AND_NATIVE_APP_SMOKE_OK",APPNAME)
         else:
             bundle=stage/(APPNAME+".app")
