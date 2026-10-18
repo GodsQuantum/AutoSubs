@@ -10,12 +10,19 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-VERSION = "v9.0.2"
-BASE = f"https://github.com/binmgr/ffmpeg/releases/download/{VERSION}"
+# Each OS has a separate upstream archive verified with its release digest.
+# These builds must expose FFmpeg's libass/subtitles filter.
+VERSION = "pinned-2026-10-18"
+BASE = ""
+URLS = {
+    "windows-amd64": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip",
+    "darwin-amd64": "https://github.com/vanloctech/ffmpeg-macos/releases/download/ffmpeg-2026.06.11/ffmpeg-macos-x64.tar.gz",
+    "darwin-arm64": "https://github.com/vanloctech/ffmpeg-macos/releases/download/ffmpeg-2026.06.11/ffmpeg-macos-arm64.tar.gz",
+}
 LOCK = {
-    "windows-amd64": ("ffmpeg-windows-amd64.zip", "debe985a2d72005badb1ef88fb34d313801b114cb7de781aaba66bffcc37668e"),
-    "darwin-amd64": ("ffmpeg-darwin-amd64.tar.gz", "615a1028961d45999256ef32c5342c1480260fb8d19077383d13e694283f6ab2"),
-    "darwin-arm64": ("ffmpeg-darwin-arm64.tar.gz", "32bb9b7cc74d0581841bbafdd412ae7f5bc286be56f7a9aa6f9031868cfb26e6"),
+    "windows-amd64": ("ffmpeg-n8.1-latest-win64-gpl-8.1.zip", "aa5132c64f081d2cb90ece95e6aac15a365a5dab86a4e2e042b84b68f3ce20f8"),
+    "darwin-amd64": ("ffmpeg-macos-x64.tar.gz", "8317f17790749fd3502384201fd4d9d2a998ff9b8452d3b8b54b3b9af6a16e39"),
+    "darwin-arm64": ("ffmpeg-macos-arm64.tar.gz", "26f5133f88d5ab1254cc03499acef42dae2dbc574dd26e0dade8c968420127e9"),
 }
 
 
@@ -24,7 +31,7 @@ def download(variant: str, out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     archive = out / filename
     if not archive.is_file():
-        request = urllib.request.Request(f"{BASE}/{filename}", headers={"User-Agent": "Cloud9-Desktop-Installer/1.0"})
+        request = urllib.request.Request(URLS[variant], headers={"User-Agent": "Cloud9-Desktop-Installer/1.0"})
         with urllib.request.urlopen(request, timeout=120) as response, archive.open("wb") as target:
             shutil.copyfileobj(response, target)
     got = hashlib.file_digest(archive.open("rb"), "sha256").hexdigest()
