@@ -17,7 +17,14 @@ pub struct Config {
     pub fonts_dir: PathBuf,
     #[arg(long, env = "AUTOSUBS_DIST_DIR", default_value = "/app/frontend")]
     pub dist_dir: PathBuf,
-    #[arg(long, env = "AUTOSUBS_ALLOWED_ROOTS", value_delimiter = ':')]
+    #[cfg_attr(
+        windows,
+        arg(long, env = "AUTOSUBS_ALLOWED_ROOTS", value_delimiter = ';')
+    )]
+    #[cfg_attr(
+        not(windows),
+        arg(long, env = "AUTOSUBS_ALLOWED_ROOTS", value_delimiter = ':')
+    )]
     pub allowed_roots: Vec<PathBuf>,
     #[arg(long, env = "AUTOSUBS_MAX_RENDER_JOBS", default_value_t = 2)]
     pub max_render_jobs: usize,
@@ -236,6 +243,23 @@ pub fn ensure_sqlite_local(config_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allowed_roots_delimiter_is_platform_native() {
+        let paths = if cfg!(windows) {
+            r"C:\Media;D:\Audio"
+        } else {
+            "/mnt/media:/mnt/audio"
+        };
+        let config = Config::try_parse_from(["app", "--allowed-roots", paths])
+            .expect("platform-native allowed-roots separator");
+        assert_eq!(config.allowed_roots.len(), 2);
+        if cfg!(windows) {
+            assert_eq!(config.allowed_roots[0], PathBuf::from(r"C:\Media"));
+            assert_eq!(config.allowed_roots[1], PathBuf::from(r"D:\Audio"));
+        }
+    }
+
     #[test]
     fn fonts_dir_defaults_to_docker_mount_but_is_portable_and_configurable() {
         let config = <Config as clap::Parser>::try_parse_from(["autosubs"]).unwrap();
