@@ -58,10 +58,11 @@ def main() -> None:
         text=True,errors="replace",timeout=30)
     license_file=resources/"THIRD-PARTY-FFMPEG.txt"
     license_file.write_text(
-        "FFmpeg " + "9.0.2" + " — binary distributor: binmgr/ffmpeg v9.0.2\n"
-        "Binary: https://github.com/binmgr/ffmpeg/releases/tag/v9.0.2\n"
-        "Source: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz\n"
-        "License output from the packaged ffmpeg -L command:\n\n"
+        "AutoSubs FFmpeg media tools - immutable upstream SHA256 release assets\n"
+        "macOS: https://github.com/vanloctech/ffmpeg-macos/releases/tag/ffmpeg-2026.06.11\n"
+        "Windows: https://github.com/BtbN/FFmpeg-Builds/releases/tag/latest\n"
+        "Sources: https://ffmpeg.org/download.html\n\n"
+        "Original FFmpeg -L licensing output follows:\n\n"
         + ffmpeg_license, encoding="utf-8")
     files=sorted(p for p in out.rglob("*") if p.is_file())
     sums={p.relative_to(out).as_posix():digest(p) for p in files}
