@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { normalizeSpeachesUrl, probeSpeaches } from '../src/lib/speaches-discovery.js';
+
+test('keeps localhost/private LAN HTTP and refuses public HTTP and credentials', () => {
+  assert.equal(normalizeSpeachesUrl('http://127.0.0.1:8005/v1'), 'http://127.0.0.1:8005');
+  assert.equal(normalizeSpeachesUrl('http://192.168.1.219:8005'), 'http://192.168.1.219:8005');
+  assert.equal(normalizeSpeachesUrl('https://speaches.example.test'), 'https://speaches.example.test');
+  assert.throws(() => normalizeSpeachesUrl('http://example.com'), /HTTPS/);
+  assert.throws(() => normalizeSpeachesUrl('http://user:secret@127.0.0.1:8005'), /credentials/);
+  assert.throws(() => normalizeSpeachesUrl('file:///tmp/test'), /HTTP/);
+});
+
+test('discovers compatible Whisper Turbo and FastConformer without GPU claims', async () => {
+  const calls = [];
+  const fake = async (url) => {
+    calls.push(url);
+    let data;
+    if (url === 'http://127.0.0.1:8005/health') data = {message:'OK'};
+    else if (url.endsWith('/v1/models')) data = {data:[{id:'handy-computer/whisper-large-v3-turbo-gguf'}]};
+    else data = {status:'ok',backend:'vulkan',backend_selection:'configured_not_hardware_probed',
+      models:[{id:'fastconformer-fr-q4',available:true}]};
+    return {ok:true,json: async()=>data};
+  };
+  const result = await probeSpeaches('http://127.0.0.1:8005', fake);
+  assert.equal(result.model,'handy-computer/whisper-large-v3-turbo-gguf');
+  assert.equal(result.alignmentUrl,'http://127.0.0.1:8005/align');
+  assert.equal(result.backend,'vulkan');
+  assert.equal(result.backendVerified,false);
+  assert.equal(calls.length,3);
+});
+
+test('rejects missing acoustic model before changing settings', async () => {
+  const fake = async (url) => ({ok:true,json:async()=>
+    url.endsWith('/v1/models')?{data:[{id:'handy-computer/whisper-large-v3-turbo-gguf'}]}
+      :url.endsWith('/health')?{message:'OK'}:{status:'ok',models:[]}});
+  await assert.rejects(() => probeSpeaches('http://127.0.0.1:8005',fake),/FastConformer/);
+});
