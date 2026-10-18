@@ -49,6 +49,17 @@ jobs:
           npm ci --no-audit
           npm run check
           npm run build
+      - name: Install actual FFmpeg/FFprobe runtime for native media tests
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            choco install ffmpeg --yes --no-progress
+          else
+            brew install ffmpeg
+          fi
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -version | head -1
       - name: Rust native tests
         shell: bash
         run: |
