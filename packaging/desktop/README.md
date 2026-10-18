@@ -5,7 +5,7 @@ without Docker, Python or a separate browser extension. The launcher opens the a
 in the system's default browser and runs a loopback-only service.
 
 - Windows 11 AMD64: NSIS per-user setup, includes backend, frontend,
-  FFmpeg/FFprobe 9.0.2, license, shortcut, clean uninstaller. Keeps user data.
+  FFmpeg/FFprobe with verified libass/subtitles support, license, shortcut, clean uninstaller. Keeps user data.
 - macOS 15 Apple Silicon and Intel: .app in a mounted .dmg with all resources.
   The candidate uses **ad-hoc** signing only. Production Apple distribution
   requires a Developer ID certificate, hardened signing and notarization.
@@ -16,7 +16,7 @@ in the system's default browser and runs a loopback-only service.
 - Tests build/assemble the installer on the actual target OS, unpack/install,
   verify launcher's --check-install, launch a real Rust backend with --smoke,
   and exercise clean uninstallation on Windows.
-- FFmpeg is fetched from pinned upstream v9.0.2 assets by SHA256, never latest;
+- FFmpeg binaries are pinned by exact SHA256 to source-defined upstream assets, not automatically upgraded;
   bundling its original -L license terms and source URL.
 - Unsigned preview artifacts are **NOT** certified as signed/notarized public
   binaries and should not be promoted into a stable release without signing
