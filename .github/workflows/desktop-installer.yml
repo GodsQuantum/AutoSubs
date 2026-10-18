@@ -1,0 +1,71 @@
+name: Unsigned native desktop installer candidate
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'frontend/**'
+      - 'packaging/desktop/**'
+      - '.github/workflows/desktop-installer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-desktop:
+    name: 'Installer / ${{ matrix.os }}'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15, macos-15-intel]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.20.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install project-pinned Rust 1.98
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+      - name: Compile the full frontend and both Rust executables
+        shell: bash
+        run: |
+          cd frontend
+          npm ci --no-audit
+          npm run check
+          npm run build
+          cd ..
+          cargo build --release --locked
+          cargo build --release --locked --manifest-path packaging/desktop/launcher/Cargo.toml
+      - name: Build and test complete native installer with pinned FFmpeg
+        shell: bash
+        run: |
+          python packaging/desktop/native_pipeline.py
+      - name: Upload unsigned/non-notarized candidate + SHA256
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: 'desktop-unsigned-${{ matrix.os }}'
+          path: |
+            dist/desktop/*.exe
+            dist/desktop/*.dmg
+            dist/desktop/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+# Candidates must not be marked as signed, notarized or hardware-certified.
+# Tests cover real install/mount, launched API, frontend, FFmpeg and uninstall.
+# Full FFmpeg media and actual GPU tests are separate mandatory release gates.

@@ -1,0 +1,9 @@
+[package]
+name = "autosubs-desktop-launcher"
+version = "3.6.3"
+edition = "2024"
+rust-version = "1.98"
+
+[[bin]]
+name = "AutoSubs"
+path = "src/main.rs"
