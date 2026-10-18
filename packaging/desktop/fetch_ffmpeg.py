@@ -13,7 +13,6 @@ from pathlib import Path
 # Each OS has a separate upstream archive verified with its release digest.
 # These builds must expose FFmpeg's libass/subtitles filter.
 VERSION = "pinned-2026-10-18"
-BASE = ""
 URLS = {
     "windows-amd64": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip",
     "darwin-amd64": "https://github.com/vanloctech/ffmpeg-macos/releases/download/ffmpeg-2026.06.11/ffmpeg-macos-x64.tar.gz",
