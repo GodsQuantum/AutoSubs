@@ -425,7 +425,7 @@ mod tests {
         let id = font_id(std::path::Path::new("safe.ttf"));
         assert_eq!(
             resolve_app_font_content(root.path(), &id).unwrap(),
-            root.path().join("safe.ttf")
+            fs::canonicalize(root.path().join("safe.ttf")).unwrap()
         );
         assert!(resolve_app_font_content(root.path(), "2e2e2f6576696c2e747466").is_err());
     }
