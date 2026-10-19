@@ -101,7 +101,13 @@ def main() -> None:
                     "-mountpoint",mount,output)
                 binary=mount/(APPNAME+".app")/"Contents"/"MacOS"/APPNAME
                 run(binary,"--check-install",env=env)
-                run(binary,"--smoke",env=env)
+                try:
+                    run(binary,"--smoke",env=env)
+                except subprocess.CalledProcessError:
+                    server_log=Path.home()/"Library"/"Application Support"/APPNAME/"desktop.log"
+                    if server_log.is_file():
+                        print("NATIVE_STARTUP_LOG_TAIL:\n"+server_log.read_text(errors="replace")[-5000:],flush=True)
+                    raise
             finally:
                 run("hdiutil","detach","-quiet",mount)
                 mount.rmdir()
