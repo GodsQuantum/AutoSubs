@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from '$lib/api';
   import { dictionary } from '$lib/i18n';
-  import { probeSpeaches } from '$lib/speaches-discovery.js';
+  import { probeSpeachesViaApp } from '$lib/speaches-discovery.js';
   import type { Capabilities, EncoderKind, SettingsView } from '$lib/types';
   export let settings:SettingsView|undefined; export let capabilities:Capabilities|undefined;
   export let refresh:()=>Promise<void>=async()=>{}; export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
@@ -16,7 +16,7 @@
     if (!loaded || speachesBusy) return;
     speachesBusy = true;
     try {
-      const found = await probeSpeaches(speachesAddress);
+      const found = await probeSpeachesViaApp(speachesAddress);
       const previous: SettingsView = JSON.parse(JSON.stringify(loaded));
       const next: SettingsView = {
         ...previous, localTranscriptionEnabled: true, localFallbackEnabled: true,
