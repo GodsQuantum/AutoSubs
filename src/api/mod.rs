@@ -8,6 +8,7 @@ pub mod media;
 pub mod preview;
 pub mod resources;
 pub mod settings;
+pub mod speaches;
 pub mod uploads;
 
 use crate::{error::AppResult, state::AppState};
@@ -47,6 +48,7 @@ async fn capabilities(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/health", get(health))
+        .route("/api/v1/speaches/probe", post(speaches::probe))
         .route("/api/v1/capabilities", get(capabilities))
         .route("/api/v1/preview/frame", post(preview::frame))
         .route(

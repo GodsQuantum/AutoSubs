@@ -58,3 +58,23 @@ export async function probeSpeaches(value, fetcher = fetch) {
     backendVerified: alignment.backend_selection !== 'configured_not_hardware_probed',
   };
 }
+
+/** Probe through this application's local Rust API, not across browser origins.
+ * The Rust server pins validated private IPs before contacting Cloud9-Speaches.
+ * @param {string} value
+ * @param {typeof fetch} [fetcher]
+ */
+export async function probeSpeachesViaApp(value, fetcher = fetch) {
+  const origin = normalizeSpeachesUrl(value);
+  const response = await fetcher('/api/v1/speaches/probe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: origin }),
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data?.error?.message || ('Cloud9-Speaches probe failed (' + response.status + ')'));
+  }
+  return response.json();
+}
