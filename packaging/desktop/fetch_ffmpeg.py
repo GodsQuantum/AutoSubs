@@ -14,12 +14,12 @@ from pathlib import Path
 # These builds must expose FFmpeg's libass/subtitles filter.
 VERSION = "pinned-2026-10-18"
 URLS = {
-    "windows-amd64": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip",
+    "windows-amd64": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-19-13-06/ffmpeg-n8.1.3-18-g46d899d7a0-win64-gpl-8.1.zip",
     "darwin-amd64": "https://github.com/vanloctech/ffmpeg-macos/releases/download/ffmpeg-2026.06.11/ffmpeg-macos-x64.tar.gz",
     "darwin-arm64": "https://github.com/vanloctech/ffmpeg-macos/releases/download/ffmpeg-2026.06.11/ffmpeg-macos-arm64.tar.gz",
 }
 LOCK = {
-    "windows-amd64": ("ffmpeg-n8.1-latest-win64-gpl-8.1.zip", "aa5132c64f081d2cb90ece95e6aac15a365a5dab86a4e2e042b84b68f3ce20f8"),
+    "windows-amd64": ("ffmpeg-n8.1.3-18-g46d899d7a0-win64-gpl-8.1.zip", "5dc774c80fca5b63803ce052cbb1c7fc82aaccf3908b32e34f8842b367573c37"),
     "darwin-amd64": ("ffmpeg-macos-x64.tar.gz", "8317f17790749fd3502384201fd4d9d2a998ff9b8452d3b8b54b3b9af6a16e39"),
     "darwin-arm64": ("ffmpeg-macos-arm64.tar.gz", "26f5133f88d5ab1254cc03499acef42dae2dbc574dd26e0dade8c968420127e9"),
 }
