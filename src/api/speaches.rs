@@ -101,10 +101,11 @@ async fn pinned_client(hostname: &str, port: u16) -> AppResult<Client> {
         let addresses: Vec<SocketAddr> = tokio::net::lookup_host((hostname, port))
             .await
             .map_err(|_| AppError::BadRequest("Speaches host cannot be resolved".into()))?
+            .filter(|address| safe_ip(address.ip()))
             .collect();
-        if addresses.is_empty() || addresses.iter().any(|address| !safe_ip(address.ip())) {
+        if addresses.is_empty() {
             return Err(AppError::BadRequest(
-                "Speaches hostname resolves outside the private LAN".into(),
+                "Speaches hostname has no permitted private LAN address".into(),
             ));
         }
         builder = builder.resolve_to_addrs(hostname, &addresses);
