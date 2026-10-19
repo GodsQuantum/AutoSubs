@@ -58,7 +58,6 @@ def main() -> None:
         env[APP.upper()+"_PORT"]=PORT
         env["NO_PROXY"]="localhost,127.0.0.1"
         if WINDOWS:
-            run("choco","install","nsis","--yes","--no-progress")
             candidates=[shutil.which("makensis"),
                 r"C:\Program Files (x86)\NSIS\makensis.exe",
                 r"C:\Program Files\NSIS\makensis.exe"]

@@ -51,6 +51,16 @@ jobs:
           cd ..
           cargo build --release --locked
           cargo build --release --locked --manifest-path packaging/desktop/launcher/Cargo.toml
+      - name: Verify immutable installer dependencies
+        shell: bash
+        run: |
+          python -m unittest discover -s packaging/desktop -p test_installer_dependencies.py -v
+      - name: Install NSIS from immutable GitHub action
+        if: runner.os == 'Windows'
+        uses: negrutiu/nsis-install@f3339c88dba6fd08910d5275a943f8f746d94876 # v2
+        with:
+          distro: negrutiu
+          arch: amd64
       - name: Build and test complete native installer with pinned FFmpeg
         shell: bash
         run: |
