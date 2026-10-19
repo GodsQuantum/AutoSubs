@@ -194,6 +194,7 @@ fn launch(smoke: bool, no_browser: bool) -> Result<(), String> {
         .env(format!("{APP_ENV}_PORT"), port.to_string())
         .env(format!("{APP_ENV}_CONFIG_DIR"), &config)
         .env(format!("{APP_ENV}_DATA_DIR"), &data)
+        .env("AUTOSUBS_FONTS_DIR", &fonts)
         .env(format!("{APP_ENV}_DIST_DIR"), &frontend)
         .env(format!("{APP_ENV}_ALLOWED_ROOTS"), roots)
         .env("PATH", path)
