@@ -11,6 +11,8 @@ import time
 import tomllib
 from pathlib import Path
 
+from media_smoke import verify_real_media
+
 ROOT=Path(__file__).resolve().parents[2]
 APP=tomllib.loads((ROOT/"Cargo.toml").read_text())["package"]["name"]
 APPNAME="AutoSubs" if APP=="autosubs" else "ScribeWatch"
@@ -50,6 +52,7 @@ def main() -> None:
         filters=subprocess.check_output([str(ffmpeg),"-hide_banner","-filters"],text=True,timeout=30)
         if APP=="autosubs":
             assert "subtitles" in filters and "ass" in filters, "FFmpeg libass/subtitles is mandatory for AutoSubs"
+        verify_real_media(ffmpeg, ffprobe, needs_subtitles=APP=="autosubs")
         run(sys.executable,ROOT/"packaging"/"desktop"/"stage.py",
             "--repo",ROOT,"--platform",OS,"--server",SERVER,
             "--launcher",LAUNCHER,"--ffmpeg",FF,"--output",stage)
