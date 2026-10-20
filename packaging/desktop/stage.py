@@ -60,7 +60,8 @@ def main() -> None:
     license_file.write_text(
         "AutoSubs FFmpeg media tools - immutable upstream SHA256 release assets\n"
         "macOS: https://github.com/vanloctech/ffmpeg-macos/releases/tag/ffmpeg-2026.06.11\n"
-        "Windows: https://github.com/BtbN/FFmpeg-Builds/releases/tag/latest\n"
+        "Windows: https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-10-19-13-06\n"
+        "Windows archive SHA256: 5dc774c80fca5b63803ce052cbb1c7fc82aaccf3908b32e34f8842b367573c37\n"
         "Sources: https://ffmpeg.org/download.html\n\n"
         "Original FFmpeg -L licensing output follows:\n\n"
         + ffmpeg_license, encoding="utf-8")
