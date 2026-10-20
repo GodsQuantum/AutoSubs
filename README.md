@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/image-GHCR-54cd8a" alt="GHCR image">
 </p>
 
-<p align="center">🇫🇷 <a href="README.fr.md">README en français</a></p>
+<p align="center">🇫🇷 <a href="README.fr.md">README en français</a> · <a href="README.zh-CN.md">简体中文</a></p>
 
 ---
 
@@ -360,3 +360,21 @@ See [security policy](.github/SECURITY.md) for vulnerability reporting and deplo
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Hardware-aware, safe performance starter
+
+**Downloads:** [Linux release](https://github.com/GodsQuantum/AutoSubs/releases) · [Windows x64 + macOS Intel/Apple Silicon native release candidates](https://github.com/GodsQuantum/AutoSubs/releases/tag/desktop-v3.6.3-rc.2). Windows/macOS packages are **unsigned / not Apple-notarized**; verify the adjacent SHA256 files.
+
+**Detect practical starting concurrency** with Python 3.9+, without changing files, database or running services:
+
+~~~bash
+python3 scripts/auto-tune.py           # machine-readable CPU + RAM diagnosis
+python3 scripts/auto-tune.py --env     # safe settings to copy to existing .env
+~~~
+
+- Small computer (2–4 effective threads or below 8 GiB): 1 rendering job and 1 transcription job.
+- Ryzen 7 8845HS with 16 threads and 32 GiB shared container: begin with 2 renders and 2 transcriptions. Raising parallelism without benchmarks can slow both tasks.
+- With FFmpeg video, only use VAAPI/NVENC after **a real file encode test** confirms the GPU device, output resolution, burned subtitle pixels and acceptable quality. Merely listing an FFmpeg encoder is not proof of acceleration.
+- In Settings, pair a reachable OpenAI-compatible Speaches /v1 endpoint and probe real models. For word-level subtitles, test the aligner; not all Whisper, Qwen3-ASR and Nemotron models return the same native timestamps. Compare a real short video, SRT, and rendered video before watch-folder automation.
+
+Use a protected reverse proxy for remote access; Docker defaults to 127.0.0.1. Stored UI preferences may take precedence over first-boot .env settings. Hardware detection is an **advisory starting profile, not an automatic GPU switch or certified speed gain**.
