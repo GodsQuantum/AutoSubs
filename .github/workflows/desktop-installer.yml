@@ -61,6 +61,10 @@ jobs:
         with:
           distro: negrutiu
           arch: amd64
+      - name: Regression tests for actual FFmpeg/libass media checks
+        shell: bash
+        run: |
+          python -m unittest discover -s packaging/desktop -p test_media_smoke.py -v
       - name: Build and test complete native installer with pinned FFmpeg
         shell: bash
         run: |
