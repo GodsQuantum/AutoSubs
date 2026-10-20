@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/image-GHCR-54cd8a" alt="Image GHCR">
 </p>
 
-<p align="center">🇬🇧 <a href="README.md">English README</a></p>
+<p align="center">🇬🇧 <a href="README.md">English README</a> · <a href="README.zh-CN.md">简体中文</a></p>
 
 ---
 
@@ -253,3 +253,18 @@ Voir [politique de sécurité](.github/SECURITY.md).
 ## Licence
 
 MIT — voir [LICENSE](LICENSE).
+
+## Profil matériel et performances, sans risque
+
+**Installateurs :** [Linux](https://github.com/GodsQuantum/AutoSubs/releases) · [candidats Windows x64 / macOS Intel et Apple Silicon](https://github.com/GodsQuantum/AutoSubs/releases/tag/desktop-v3.6.3-rc.2). Les candidats Windows/macOS **ne sont pas officiellement signés/notarisés** ; vérifier les SHA256.
+
+~~~bash
+python3 scripts/auto-tune.py         # affinité CPU et mémoire du conteneur
+python3 scripts/auto-tune.py --env   # recommandations à reporter manuellement dans .env
+~~~
+
+Sur 2 à 4 threads ou moins de 8 Gio, commencer par un rendu et une transcription simultanés au maximum. Sur Ryzen 7 8845HS (16 threads, conteneur partagé de 32 Gio), partir de 2 rendus et 2 transcriptions : augmenter la concurrence sans mesurer peut ralentir la machine. Ne choisir VAAPI/NVENC qu'après un **vrai encodage d'essai** vérifiant qualité, résolution et incrustation des sous-titres avec FFmpeg/libass.
+
+Dans Paramètres, appairer un Speaches compatible OpenAI via /v1, vérifier les modèles disponibles et mesurer les temps par mot avant de traiter tout un dossier : Whisper, Qwen3-ASR et Nemotron ne fournissent pas des timestamps identiques. Vérifier vidéo finale et SRT sur un extrait court.
+
+Le script **ne modifie ni la production ni la base de données**. Les préférences enregistrées peuvent primer sur le .env de premier démarrage. Garder Docker en loopback ou derrière un reverse proxy authentifié et HTTPS.
