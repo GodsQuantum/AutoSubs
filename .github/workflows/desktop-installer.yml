@@ -28,12 +28,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.20.0'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install project-pinned Rust 1.98
@@ -57,7 +57,7 @@ jobs:
           python -m unittest discover -s packaging/desktop -p test_installer_dependencies.py -v
       - name: Install NSIS from immutable GitHub action
         if: runner.os == 'Windows'
-        uses: negrutiu/nsis-install@f3339c88dba6fd08910d5275a943f8f746d94876 # v2
+        uses: negrutiu/nsis-install@9c575d44c2938a43e38a305caeb403de90303c60 # v3
         with:
           distro: negrutiu
           arch: amd64
