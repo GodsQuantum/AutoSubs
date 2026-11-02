@@ -176,6 +176,95 @@ fn word_by_word_units(line: &SubtitleLine) -> Vec<SubtitleWord> {
     units
 }
 
+// ASS stores time to centiseconds, whereas word alignment and SRT use much
+// finer units. If two animated captions quantize onto overlapping intervals,
+// libass can draw both at once. Keep the newest event at each shared boundary.
+// This guard applies to all animation styles and does not modify valid events.
+fn exclusive_ass_dialogues(ass: String) -> String {
+    #[derive(Debug)]
+    struct Dialogue {
+        start: u64,
+        end: u64,
+        tail: String,
+    }
+
+    fn centiseconds(raw: &str) -> Option<u64> {
+        let (h, remainder) = raw.split_once(':')?;
+        let (m, remainder) = remainder.split_once(':')?;
+        let (s, cs) = remainder.split_once('.')?;
+        if cs.len() != 2 {
+            return None;
+        }
+        let h = h.parse::<u64>().ok()?;
+        let m = m.parse::<u64>().ok()?;
+        let s = s.parse::<u64>().ok()?;
+        let cs = cs.parse::<u64>().ok()?;
+        (m < 60 && s < 60 && cs < 100).then_some((((h * 60 + m) * 60 + s) * 100) + cs)
+    }
+
+    fn format_centiseconds(value: u64) -> String {
+        let hours = value / 360_000;
+        let minutes = (value / 6_000) % 60;
+        let seconds = (value / 100) % 60;
+        let cs = value % 100;
+        format!("{hours}:{minutes:02}:{seconds:02}.{cs:02}")
+    }
+
+    let Some((header, dialogue_text)) = ass.split_once("\nDialogue:") else {
+        return ass;
+    };
+    let mut events = Vec::new();
+    for (index, row) in format!("Dialogue:{dialogue_text}").lines().enumerate() {
+        let mut fields = row.splitn(4, ',');
+        let Some(prefix) = fields.next() else {
+            return ass;
+        };
+        if prefix != "Dialogue: 0" {
+            return ass;
+        }
+        let (Some(start), Some(end), Some(tail)) = (fields.next(), fields.next(), fields.next())
+        else {
+            return ass;
+        };
+        let (Some(start), Some(end)) = (centiseconds(start), centiseconds(end)) else {
+            return ass;
+        };
+        events.push((
+            index,
+            Dialogue {
+                start,
+                end,
+                tail: tail.to_owned(),
+            },
+        ));
+    }
+
+    // A caption track with explicit \pos tags is not automatically collision-
+    // resolved by libass. Sort deterministically, then make events half-open.
+    events.sort_by_key(|(index, e)| (e.start, *index));
+    for index in 0..events.len().saturating_sub(1) {
+        let next_start = events[index + 1].1.start;
+        if events[index].1.end > next_start {
+            events[index].1.end = next_start;
+        }
+    }
+    let mut output = String::with_capacity(ass.len());
+    output.push_str(header);
+    output.push('\n');
+    for (_, event) in events {
+        if event.end <= event.start {
+            continue;
+        }
+        output.push_str(&format!(
+            "Dialogue: 0,{},{},{}\n",
+            format_centiseconds(event.start),
+            format_centiseconds(event.end),
+            event.tail
+        ));
+    }
+    output
+}
+
 pub fn generate_ass_content(
     lines: &[SubtitleLine],
     preset: &Preset,
@@ -436,7 +525,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             }
         }
     }
-    out
+    exclusive_ass_dialogues(out)
 }
 
 #[cfg(test)]
@@ -452,6 +541,44 @@ mod tests {
             text: "Bonjour monde".into(),
             words: None,
         }
+    }
+
+    #[test]
+    fn ass_time_quantization_cannot_show_two_captions_simultaneously() {
+        let text = concat!(
+            "[Events]\n",
+            "Dialogue: 0,0:00:00.00,0:00:00.22,Default,autosubs:0,0,0,0,,FIRST\n",
+            "Dialogue: 0,0:00:00.21,0:00:00.40,Default,autosubs:1,0,0,0,,SECOND\n",
+            "Dialogue: 0,0:00:00.40,0:00:00.55,Default,autosubs:2,0,0,0,,THIRD\n",
+        );
+        let safe = exclusive_ass_dialogues(text.into());
+        assert!(safe.contains("0:00:00.00,0:00:00.21"), "{safe}");
+        assert!(safe.contains("0:00:00.21,0:00:00.40"), "{safe}");
+        assert!(safe.contains("0:00:00.40,0:00:00.55"), "{safe}");
+        assert_eq!(safe.matches("Dialogue:").count(), 3);
+    }
+
+    #[test]
+    fn ass_quantized_zero_duration_events_are_never_rendered() {
+        let text = concat!(
+            "[Events]\n",
+            "Dialogue: 0,0:00:01.00,0:00:01.01,Default,autosubs:0,0,0,0,,OLD\n",
+            "Dialogue: 0,0:00:01.00,0:00:01.08,Default,autosubs:0,0,0,0,,NEW\n",
+        );
+        let safe = exclusive_ass_dialogues(text.into());
+        assert_eq!(safe.matches("Dialogue:").count(), 1);
+        assert!(safe.contains(",,NEW"));
+        assert!(!safe.contains(",,OLD"));
+    }
+
+    #[test]
+    fn already_exclusive_dialogues_are_unchanged() {
+        let text = concat!(
+            "[Events]\n",
+            "Dialogue: 0,0:00:00.00,0:00:00.18,Default,autosubs:0,0,0,0,,A\n",
+            "Dialogue: 0,0:00:00.20,0:00:00.40,Default,autosubs:1,0,0,0,,B\n",
+        );
+        assert_eq!(exclusive_ass_dialogues(text.to_owned()), text);
     }
 
     #[test]
