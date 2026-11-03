@@ -6,9 +6,9 @@ from pathlib import Path
 from fetch_ffmpeg import LOCK, URLS
 
 ROOT = Path(__file__).resolve().parents[2]
-RELEASE = "autobuild-2026-10-19-13-06"
-ASSET = "ffmpeg-n8.1.3-18-g46d899d7a0-win64-gpl-8.1.zip"
-DIGEST = "5dc774c80fca5b63803ce052cbb1c7fc82aaccf3908b32e34f8842b367573c37"
+RELEASE = "autobuild-2026-10-31-12-59"
+ASSET = "ffmpeg-n8.1.3-27-g8dca1586f4-win64-gpl-8.1.zip"
+DIGEST = "401dffcf14c301082e1fc03b0bc876b92ea676bfc521fc56e80a1537d137034f"
 NSIS_ACTION = "negrutiu/nsis-install@f3339c88dba6fd08910d5275a943f8f746d94876"
 
 

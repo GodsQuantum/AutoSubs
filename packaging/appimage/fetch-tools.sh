@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+# Immutable tagged upstream releases, digest-pinned from official GitHub
+# release assets. Never swap to /continuous without a provenance/release audit.
 verify_sha256() {
   file=$1
   expected=$2
@@ -24,15 +26,15 @@ arch="${1:-$(uname -m)}"
 case "$arch" in
   x86_64|amd64)
     arch=x86_64
-    linuxdeploy_sha=8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1
-    appimagetool_sha=95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
-    runtime_sha=156f4bdbde9c52d01814600013e0a273f0118dc2de98975f3c8c63427ec79074
+    linuxdeploy_sha=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+    appimagetool_sha=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+    runtime_sha=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
     ;;
   aarch64|arm64)
     arch=aarch64
-    linuxdeploy_sha=5c1fddf96066891e829831cac0d84424690f3b22846c7f8f1bb9990a5c6c73f4
-    appimagetool_sha=a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270
-    runtime_sha=b4ff0030242d0c3bb12ce40541828303cf167493f4793456f0436edd6255c39d
+    linuxdeploy_sha=620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff
+    appimagetool_sha=f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
+    runtime_sha=00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444
     ;;
   *)
     printf 'unsupported AppImage architecture: %s\n' "$arch" >&2
@@ -75,15 +77,15 @@ fetch_one() {
 }
 
 fetch_one "linuxdeploy-$arch.AppImage" \
-  "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$arch.AppImage" \
+  "https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-$arch.AppImage" \
   "$linuxdeploy_sha"
 
 fetch_one "appimagetool-$arch.AppImage" \
-  "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage" \
+  "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-$arch.AppImage" \
   "$appimagetool_sha"
 
 fetch_one "runtime-$arch" \
-  "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$arch" \
+  "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-$arch" \
   "$runtime_sha"
 
 printf '%s\n' "$cache_dir/linuxdeploy-$arch.AppImage"
