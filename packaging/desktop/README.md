@@ -25,3 +25,20 @@ in the system's default browser and runs a loopback-only service.
   require separate integration tests. CI runners may lack compatible GPUs.
 - Cloud9-Speaches pairing is available in the existing app UI; it does
   not imply that Cloud9-Speaches has itself been packaged on Windows/macOS.
+
+## Native systray — optional, single owned backend
+
+In desktop sessions the native launcher keeps one AutoSubs system tray icon
+with Open AutoSubs, opt-in Run at login, and Quit AutoSubs. Closing the browser
+tab does not discard an active rendering job: the tray continues to own the
+local backend until Quit. Quit or event-loop initialization failure terminates
+and reaps the owned backend; it never kills an external AutoSubs/Speaches process.
+Relaunching an existing version opens its browser tab without starting a second
+listener. On headless Linux the original console mode is preserved; --no-tray
+also explicitly selects console mode.
+
+Windows uses HKCU Run, macOS a per-user LaunchAgent, Linux a per-user XDG
+autostart desktop entry. All are opt-in. No root service or timer is added.
+
+This feature does not yet bundle local ASR or LLM engines. Optional internal
+engine packaging has separate requirements in the AutoSubs desktop roadmap.
