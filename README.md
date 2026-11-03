@@ -378,3 +378,11 @@ python3 scripts/auto-tune.py --env     # safe settings to copy to existing .env
 - In Settings, pair a reachable OpenAI-compatible Speaches /v1 endpoint and probe real models. For word-level subtitles, test the aligner; not all Whisper, Qwen3-ASR and Nemotron models return the same native timestamps. Compare a real short video, SRT, and rendered video before watch-folder automation.
 
 Use a protected reverse proxy for remote access; Docker defaults to 127.0.0.1. Stored UI preferences may take precedence over first-boot .env settings. Hardware detection is an **advisory starting profile, not an automatic GPU switch or certified speed gain**.
+
+### Unified native desktop roadmap
+
+The work required for an AutoSubs systray, optional Cloud9-Speaches / llama.cpp
+native runtimes, identical Windows/macOS/Linux interface and real native tests
+and signing is tracked in
+[docs/ROADMAP_UNIFIED_DESKTOP.md](docs/ROADMAP_UNIFIED_DESKTOP.md).
+This is a plan, not a claim that the full bundles already exist.
