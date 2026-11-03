@@ -7,3 +7,11 @@ rust-version = "1.98"
 [[bin]]
 name = "AutoSubs"
 path = "src/main.rs"
+
+[dependencies]
+tray-icon = { version = "=0.26.1", default-features = false, features = ["ksni"] }
+winit = { version = "=0.30.12", default-features = false, features = ["x11", "wayland"] }
+image = { version = "=0.25.9", default-features = false, features = ["png"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "=0.55.0"
