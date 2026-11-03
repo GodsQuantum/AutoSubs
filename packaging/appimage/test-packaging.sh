@@ -13,12 +13,18 @@ fail() {
 [[ -x "$FETCH" ]] || fail "fetch-tools.sh missing or not executable"
 [[ -x "$BUILD" ]] || fail "build.sh missing or not executable"
 
-grep -F "8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1" "$FETCH" >/dev/null
-grep -F "5c1fddf96066891e829831cac0d84424690f3b22846c7f8f1bb9990a5c6c73f4" "$FETCH" >/dev/null
-grep -F "95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6" "$FETCH" >/dev/null
-grep -F "a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270" "$FETCH" >/dev/null
-grep -F "156f4bdbde9c52d01814600013e0a273f0118dc2de98975f3c8c63427ec79074" "$FETCH" >/dev/null
-grep -F "b4ff0030242d0c3bb12ce40541828303cf167493f4793456f0436edd6255c39d" "$FETCH" >/dev/null
+grep -F "c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d" "$FETCH" >/dev/null
+grep -F "620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff" "$FETCH" >/dev/null
+grep -F "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0" "$FETCH" >/dev/null
+grep -F "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158" "$FETCH" >/dev/null
+grep -F "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d" "$FETCH" >/dev/null
+grep -F "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444" "$FETCH" >/dev/null
+for release in 1-alpha-20251107-1 1.9.1 20251108; do
+  grep -F "/releases/download/$release/" "$FETCH" >/dev/null
+done
+if grep -F "/releases/download/continuous/" "$FETCH"; then
+  fail "mutable continuous AppImage download URL"
+fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
