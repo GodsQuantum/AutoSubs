@@ -12,14 +12,17 @@ from pathlib import Path
 
 # Each OS has a separate upstream archive verified with its release digest.
 # These builds must expose FFmpeg's libass/subtitles filter.
-VERSION = "pinned-2026-10-18"
+# BtbN retains month-end autobuilds for two years; daily builds disappear
+# after 14 days. Do NOT point a pinned SHA at a mutable "latest" release.
+# https://github.com/BtbN/FFmpeg-Builds#release-retention-policy
+VERSION = "pinned-2026-11-04"
 URLS = {
-    "windows-amd64": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-19-13-06/ffmpeg-n8.1.3-18-g46d899d7a0-win64-gpl-8.1.zip",
+    "windows-amd64": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n8.1.3-27-g8dca1586f4-win64-gpl-8.1.zip",
     "darwin-amd64": "https://github.com/vanloctech/ffmpeg-macos/releases/download/ffmpeg-2026.06.11/ffmpeg-macos-x64.tar.gz",
     "darwin-arm64": "https://github.com/vanloctech/ffmpeg-macos/releases/download/ffmpeg-2026.06.11/ffmpeg-macos-arm64.tar.gz",
 }
 LOCK = {
-    "windows-amd64": ("ffmpeg-n8.1.3-18-g46d899d7a0-win64-gpl-8.1.zip", "5dc774c80fca5b63803ce052cbb1c7fc82aaccf3908b32e34f8842b367573c37"),
+    "windows-amd64": ("ffmpeg-n8.1.3-27-g8dca1586f4-win64-gpl-8.1.zip", "401dffcf14c301082e1fc03b0bc876b92ea676bfc521fc56e80a1537d137034f"),
     "darwin-amd64": ("ffmpeg-macos-x64.tar.gz", "8317f17790749fd3502384201fd4d9d2a998ff9b8452d3b8b54b3b9af6a16e39"),
     "darwin-arm64": ("ffmpeg-macos-arm64.tar.gz", "26f5133f88d5ab1254cc03499acef42dae2dbc574dd26e0dade8c968420127e9"),
 }
