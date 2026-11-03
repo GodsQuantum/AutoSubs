@@ -9,6 +9,8 @@ use std::{
     time::Duration,
 };
 
+mod desktop_tray;
+
 const APP_NAME: &str = "AutoSubs";
 const APP_ENV: &str = "AUTOSUBS";
 const SERVER_NAME: &str = "autosubs-server";
@@ -233,6 +235,16 @@ fn launch(smoke: bool, no_browser: bool) -> Result<(), String> {
     }
     if !no_browser {
         open_browser(port)?;
+    }
+    // In a desktop session the native tray owns the backend child process.
+    // CLI checks and headless systems preserve the original launcher behavior.
+    if !env::args().any(|arg| arg == "--no-tray")
+        && (cfg!(target_os = "windows")
+            || cfg!(target_os = "macos")
+            || env::var_os("DISPLAY").is_some()
+            || env::var_os("WAYLAND_DISPLAY").is_some())
+    {
+        return desktop_tray::run(port, child);
     }
     let status = child.wait().map_err(|e| e.to_string())?;
     if !status.success() {
