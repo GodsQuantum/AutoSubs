@@ -51,6 +51,8 @@ jobs:
           cd ..
           cargo build --release --locked
           cargo build --release --locked --manifest-path packaging/desktop/launcher/Cargo.toml
+          # The same launcher is compiled and tested on Windows + both macOS architectures.
+          cargo test --locked --manifest-path packaging/desktop/launcher/Cargo.toml
       - name: Verify immutable installer dependencies
         shell: bash
         run: |
