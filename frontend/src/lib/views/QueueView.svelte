@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { api, renderedVideoUrl, tusUpload } from '$lib/api';
-  import { dictionary } from '$lib/i18n';
-  import type { Job, Preset } from '$lib/types';
-  import StatusPill from '$lib/components/StatusPill.svelte';
-  import PathPicker from '$lib/components/PathPicker.svelte';
-  import { pairFiles } from '$lib/pairing.js';
+  import { api, renderedVideoUrl, tusUpload } from '#lib/api.js';
+  import { dictionary } from '#lib/i18n.js';
+  import type { Job, Preset } from '#lib/types.js';
+  import StatusPill from '#lib/components/StatusPill.svelte';
+  import PathPicker from '#lib/components/PathPicker.svelte';
+  import { pairFiles } from '#lib/pairing.js';
 
   export let jobs: Job[] = [];
   export let presets: Preset[] = [];
@@ -116,8 +116,8 @@
   {/if}
 </div>
 
-<PathPicker open={serverPicker} mode="file" initialPath={serverVideo} extensions="" title={$dictionary.addServerVideo} onselect={(path)=>serverVideo=path} onclose={()=>serverPicker=false}/>
-<PathPicker open={serverSidecarPicker} mode="file" initialPath={serverSidecar} extensions="srt,ass,ssa,json" title={$dictionary.attachedSidecar} onselect={(path)=>serverSidecar=path} onclose={()=>serverSidecarPicker=false}/>
+<PathPicker open={serverPicker} mode="file" initialPath={serverVideo} extensions="" title={$dictionary.addServerVideo} onselect={(path: string)=>serverVideo=path} onclose={()=>serverPicker=false}/>
+<PathPicker open={serverSidecarPicker} mode="file" initialPath={serverSidecar} extensions="srt,ass,ssa,json" title={$dictionary.attachedSidecar} onselect={(path: string)=>serverSidecar=path} onclose={()=>serverSidecarPicker=false}/>
 
 {#if serverVideo}
   <div class="modal-backdrop">

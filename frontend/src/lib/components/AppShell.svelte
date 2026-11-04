@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dictionary, locale, setLocale } from '$lib/i18n';
+  import { dictionary, locale, setLocale } from '#lib/i18n.js';
   export let active: 'queue'|'editor'|'presets'|'brands'|'workflows'|'settings' = 'queue';
   export let onnav: (id: typeof active) => void = () => {};
   const items = [
