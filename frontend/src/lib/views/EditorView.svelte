@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { api, sourceVideoUrl, subtitleExportUrl } from '$lib/api';
-  import { dictionary } from '$lib/i18n';
-  import { subtitlesToVtt } from '$lib/captions.js';
-  import { splitSubtitleLine, mergeSubtitleLines, deleteSubtitleLine, insertSubtitleLineBreak, nudgeSubtitleWordBoundary, removeTerminalPeriods } from '$lib/subtitle-edit.js';
-  import { fetchDownload, saveDownload } from '$lib/download.js';
-  import type { Asset, Brand, EncoderKind, FontFace, FormatKey, FitMode, FormatProfile, Job, JobOutro, Preset, RenderOptions, RenderProfile, SubtitleLine } from '$lib/types';
-  import StatusPill from '$lib/components/StatusPill.svelte';
-  import PathPicker from '$lib/components/PathPicker.svelte';
-  import FormatPreview from '$lib/components/FormatPreview.svelte';
-  import CutStudio from '$lib/components/CutStudio.svelte';
+  import { api, sourceVideoUrl, subtitleExportUrl } from '#lib/api.js';
+  import { dictionary } from '#lib/i18n.js';
+  import { subtitlesToVtt } from '#lib/captions.js';
+  import { splitSubtitleLine, mergeSubtitleLines, deleteSubtitleLine, insertSubtitleLineBreak, nudgeSubtitleWordBoundary, removeTerminalPeriods } from '#lib/subtitle-edit.js';
+  import { fetchDownload, saveDownload } from '#lib/download.js';
+  import type { Asset, Brand, EncoderKind, FontFace, FormatKey, FitMode, FormatProfile, Job, JobOutro, Preset, RenderOptions, RenderProfile, SubtitleLine } from '#lib/types.js';
+  import StatusPill from '#lib/components/StatusPill.svelte';
+  import PathPicker from '#lib/components/PathPicker.svelte';
+  import FormatPreview from '#lib/components/FormatPreview.svelte';
+  import CutStudio from '#lib/components/CutStudio.svelte';
 
   export let job: Job | undefined;
   export let presets: Preset[] = [];
@@ -164,7 +164,7 @@
     <div class="editor-layout">
       <div class="editor-left">
         <div class="video-stage" style="padding:14px">
-          <FormatPreview format={previewFormat} preset={currentPreset} {fonts} text={activeText} words={activeWords} currentTime={currentTime} videoSrc={sourceVideoUrl(job.id)} jobId={job.id} controls={true} videoId="autosubs-editor-video" captionsSrc={captionTrackUrl} {safeZone} onVideoTimeUpdate={(time)=>currentTime=time}/>
+          <FormatPreview format={previewFormat} preset={currentPreset} {fonts} text={activeText} words={activeWords} currentTime={currentTime} videoSrc={sourceVideoUrl(job.id)} jobId={job.id} controls={true} videoId="autosubs-editor-video" captionsSrc={captionTrackUrl} {safeZone} onVideoTimeUpdate={(time: number)=>currentTime=time}/>
         </div>
         {#key job.id}
           <CutStudio jobId={job.id} {currentTime} {locked} {notify}/>

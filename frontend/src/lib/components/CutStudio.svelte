@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
-  import { addRange, totalDuration, timeLabel, nextPlaybackTime, restoreRanges } from '$lib/cut-selection.js';
+  import { api } from '#lib/api.js';
+  import { addRange, totalDuration, timeLabel, nextPlaybackTime, restoreRanges } from '#lib/cut-selection.js';
 
   export let jobId: string = '';
   export let currentTime = 0;

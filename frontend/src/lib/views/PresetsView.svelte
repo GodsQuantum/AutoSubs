@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
-  import { dictionary } from '$lib/i18n';
-  import type { Asset, Brand, FontFace, FormatKey, Preset } from '$lib/types';
-  import FormatPreview from '$lib/components/FormatPreview.svelte';
-  import NumberSlider from '$lib/components/NumberSlider.svelte';
-  import { customFontMatch, verifyCustomFont } from '$lib/preview.js';
+  import { api } from '#lib/api.js';
+  import { dictionary } from '#lib/i18n.js';
+  import type { Asset, Brand, FontFace, FormatKey, Preset } from '#lib/types.js';
+  import FormatPreview from '#lib/components/FormatPreview.svelte';
+  import NumberSlider from '#lib/components/NumberSlider.svelte';
+  import { customFontMatch, verifyCustomFont } from '#lib/preview.js';
 
   export let presets:Preset[]=[];
   export let brands:Brand[]=[];
@@ -123,13 +123,13 @@
               </div>
             </div>
             <div class="grid three"><div class="field"><label for="presets-field-9">{$dictionary.baseColor}</label><input id="presets-field-9" class="input" type="color" bind:value={draft.baseColor}/></div><div class="field"><label for="presets-field-10">{$dictionary.highlightColor}</label><input id="presets-field-10" class="input" type="color" bind:value={draft.highlightColor}/></div><div class="field"><label for="presets-field-11">{$dictionary.outlineColor}</label><input id="presets-field-11" class="input" type="color" bind:value={draft.outlineColor}/></div></div>
-            <div class="grid two"><NumberSlider label={$dictionary.size} value={draft.size} min={8} max={160} step={1} onChange={(value)=>draft={...draft,size:value}}/><NumberSlider label={$dictionary.outline} value={draft.outlineThickness} min={0} max={12} step={0.1} onChange={(value)=>draft={...draft,outlineThickness:value}}/></div>
+            <div class="grid two"><NumberSlider label={$dictionary.size} value={draft.size} min={8} max={160} step={1} onChange={(value: number)=>draft={...draft,size:value}}/><NumberSlider label={$dictionary.outline} value={draft.outlineThickness} min={0} max={12} step={0.1} onChange={(value: number)=>draft={...draft,outlineThickness:value}}/></div>
             <div class="row wrap"><label class="check"><input type="checkbox" bind:checked={draft.bold}/>{$dictionary.bold}</label><label class="check"><input type="checkbox" bind:checked={draft.italic}/>{$dictionary.italic}</label><label class="check"><input type="checkbox" bind:checked={draft.uppercase}/>{$dictionary.uppercase}</label><label class="check"><input type="checkbox" bind:checked={draft.floating}/>{$dictionary.floating}</label></div>
 
             <div class="divider"></div>
             <strong class="small">Ombre portée</strong>
-            <div class="grid two"><NumberSlider label="Distance X" value={draft.shadowOffsetX??0} min={-20} max={20} step={0.25} unit="px" onChange={(value)=>draft={...draft,shadowOffsetX:value}}/><NumberSlider label="Distance Y" value={draft.shadowOffsetY??0} min={-20} max={20} step={0.25} unit="px" onChange={(value)=>draft={...draft,shadowOffsetY:value}}/></div>
-            <div class="grid two"><NumberSlider label="Flou" value={draft.shadowBlur??0} min={0} max={20} step={0.25} unit="px" onChange={(value)=>draft={...draft,shadowBlur:value}}/><NumberSlider label="Opacité" value={draft.shadowOpacity??100} min={0} max={100} step={1} unit="%" onChange={(value)=>draft={...draft,shadowOpacity:value}}/></div>
+            <div class="grid two"><NumberSlider label="Distance X" value={draft.shadowOffsetX??0} min={-20} max={20} step={0.25} unit="px" onChange={(value: number)=>draft={...draft,shadowOffsetX:value}}/><NumberSlider label="Distance Y" value={draft.shadowOffsetY??0} min={-20} max={20} step={0.25} unit="px" onChange={(value: number)=>draft={...draft,shadowOffsetY:value}}/></div>
+            <div class="grid two"><NumberSlider label="Flou" value={draft.shadowBlur??0} min={0} max={20} step={0.25} unit="px" onChange={(value: number)=>draft={...draft,shadowBlur:value}}/><NumberSlider label="Opacité" value={draft.shadowOpacity??100} min={0} max={100} step={1} unit="%" onChange={(value: number)=>draft={...draft,shadowOpacity:value}}/></div>
             <div class="field"><label for="shadow-color">Couleur de l’ombre</label><input id="shadow-color" class="input" type="color" bind:value={draft.shadowColor}/></div>
           </div>
         </section>
@@ -137,17 +137,17 @@
         <section class="card">
           <div class="card-header"><strong>{$dictionary.placement}</strong></div>
           <div class="card-body stack">
-            <div class="grid two"><NumberSlider label={$dictionary.positionX} value={draft.positionX} min={0} max={100} step={0.5} unit="%" onChange={(value)=>draft={...draft,positionX:value}}/><NumberSlider label={$dictionary.positionY} value={draft.positionY} min={0} max={100} step={0.5} unit="%" onChange={(value)=>draft={...draft,positionY:value}}/></div>
+            <div class="grid two"><NumberSlider label={$dictionary.positionX} value={draft.positionX} min={0} max={100} step={0.5} unit="%" onChange={(value: number)=>draft={...draft,positionX:value}}/><NumberSlider label={$dictionary.positionY} value={draft.positionY} min={0} max={100} step={0.5} unit="%" onChange={(value: number)=>draft={...draft,positionY:value}}/></div>
             <div class="grid two"><div class="field"><label for="presets-field-16">{$dictionary.maxChars}</label><input id="presets-field-16" class="input" type="number" min="5" max="42" bind:value={draft.maxChars}/></div><div class="field"><label for="presets-field-17">{$dictionary.maxLines}</label><input id="presets-field-17" class="input" type="number" min="1" max="2" bind:value={draft.maxLines}/></div></div>
             <div class="field"><label for="presets-field-18">{$dictionary.keywords}</label><input id="presets-field-18" class="input" bind:value={draft.matchKeywords} placeholder="shorts, reels, interview"/></div>
-            <div class="grid two"><NumberSlider label={$dictionary.lineSpacing} value={draft.lineSpacing} min={-20} max={40} step={0.5} unit="px" onChange={(value)=>draft={...draft,lineSpacing:value}}/><NumberSlider label={$dictionary.wobbleSpeed} value={draft.wobbleSpeed} min={0.1} max={5} step={0.1} onChange={(value)=>draft={...draft,wobbleSpeed:value}}/></div>
+            <div class="grid two"><NumberSlider label={$dictionary.lineSpacing} value={draft.lineSpacing} min={-20} max={40} step={0.5} unit="px" onChange={(value: number)=>draft={...draft,lineSpacing:value}}/><NumberSlider label={$dictionary.wobbleSpeed} value={draft.wobbleSpeed} min={0.1} max={5} step={0.1} onChange={(value: number)=>draft={...draft,wobbleSpeed:value}}/></div>
           </div>
         </section>
       </div>
 
       <section class="card">
         <div class="card-header"><strong>{$dictionary.preview} · libass</strong><div class="segmented"><button class:active={safeZone==='off'} on:click={()=>safeZone='off'}>{$dictionary.none}</button><button class:active={safeZone==='generic'} on:click={()=>safeZone='generic'}>Generic</button><button class:active={safeZone==='tiktok'} on:click={()=>safeZone='tiktok'}>TikTok</button><button class:active={safeZone==='reels'} on:click={()=>safeZone='reels'}>Reels</button><button class:active={safeZone==='shorts'} on:click={()=>safeZone='shorts'}>Shorts</button></div></div>
-        <div class="card-body"><div class="preview-shell"><FormatPreview format={draft.format} preset={draft} {fonts} text={$dictionary.sampleText} {safeZone} editable={true} onPositionChange={(x,y)=>{draft.positionX=Math.round(x*2)/2;draft.positionY=Math.round(y*2)/2;draft={...draft};}}/></div></div>
+        <div class="card-body"><div class="preview-shell"><FormatPreview format={draft.format} preset={draft} {fonts} text={$dictionary.sampleText} {safeZone} editable={true} onPositionChange={(x: number,y: number)=>{draft.positionX=Math.round(x*2)/2;draft.positionY=Math.round(y*2)/2;draft={...draft};}}/></div></div>
       </section>
     </div>
   </div>

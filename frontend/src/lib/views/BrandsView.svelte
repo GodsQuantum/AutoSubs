@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { api, assetUrl } from '$lib/api';
-  import { dictionary } from '$lib/i18n';
-  import type { Asset, Brand, FormatKey, Preset } from '$lib/types';
-  import PathPicker from '$lib/components/PathPicker.svelte';
+  import { api, assetUrl } from '#lib/api.js';
+  import { dictionary } from '#lib/i18n.js';
+  import type { Asset, Brand, FormatKey, Preset } from '#lib/types.js';
+  import PathPicker from '#lib/components/PathPicker.svelte';
   export let brands:Brand[]=[];
   export let presets:Preset[]=[];
   export let assets:Asset[]=[];

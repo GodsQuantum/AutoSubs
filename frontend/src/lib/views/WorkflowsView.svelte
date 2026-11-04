@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { api } from '$lib/api';
-  import { dictionary } from '$lib/i18n';
-  import type { Brand, FormatKey, Preset, Workflow } from '$lib/types';
-  import PathPicker from '$lib/components/PathPicker.svelte';
+  import { api } from '#lib/api.js';
+  import { dictionary } from '#lib/i18n.js';
+  import type { Brand, FormatKey, Preset, Workflow } from '#lib/types.js';
+  import PathPicker from '#lib/components/PathPicker.svelte';
   export let workflows:Workflow[]=[]; export let brands:Brand[]=[]; export let presets:Preset[]=[];
   export let refresh:()=>Promise<void>=async()=>{}; export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
   let selected='';let draft:Workflow=makeWorkflow();let picker:''|'watch'|'output'|'archive'='';

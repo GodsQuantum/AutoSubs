@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
-  import type { FontFace, FormatProfile, Preset, SubtitleWord } from '$lib/types';
-  import { activeWordIndex, customFontMatch, clampPreviewPosition, demoSubtitleWords, formatRatio, karaokeProgress, loopedPreviewTime, previewSubtitleTokens, wordByWordPreviewTokens, previewWidthForRatio, safeZoneGuide, subtitlePositionBounds, scalePreviewMetric, videoObjectFit } from '$lib/preview.js';
+  import { api } from '#lib/api.js';
+  import type { FontFace, FormatProfile, Preset, SubtitleWord } from '#lib/types.js';
+  import { activeWordIndex, customFontMatch, clampPreviewPosition, demoSubtitleWords, formatRatio, karaokeProgress, loopedPreviewTime, previewSubtitleTokens, wordByWordPreviewTokens, previewWidthForRatio, safeZoneGuide, subtitlePositionBounds, scalePreviewMetric, videoObjectFit } from '#lib/preview.js';
 
   type SafeZoneKey = 'off'|'generic'|'tiktok'|'reels'|'shorts';
 
