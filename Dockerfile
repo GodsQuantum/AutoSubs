@@ -33,9 +33,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN set -eu; \
     rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*; \
     snapshot_install_ok=0; \
-    for mirror in snapshot-fastly.debian.org snapshot-cloudflare.debian.org snapshot.debian.org; do \
+    for mirror in snapshot-cloudflare.debian.org snapshot-fastly.debian.org snapshot.debian.org; do \
       printf '%s\n' "deb [check-valid-until=no] http://${mirror}/archive/debian/20260929T000000Z sid main" > /etc/apt/sources.list; \
-      if ! apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=2 -o APT::Update::Error-Mode=any update; then \
+      if ! apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o APT::Update::Error-Mode=any update; then \
         continue; \
       fi; \
       set -- ca-certificates curl fontconfig fonts-dejavu-core \
@@ -45,7 +45,7 @@ RUN set -eu; \
       if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
         set -- "$@" intel-media-va-driver=26.2.4+dfsg1-1; \
       fi; \
-      if apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=45 -y install --no-install-recommends "$@"; then \
+      if apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -y install --no-install-recommends "$@"; then \
         snapshot_install_ok=1; \
         break; \
       fi; \
