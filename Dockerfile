@@ -53,7 +53,18 @@ RUN set -eu; \
     if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
       set -- "$@" intel-media-va-driver=26.2.4+dfsg1-1; \
     fi; \
-    apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=25 -y install --no-install-recommends "$@"; \
+    # Snapshot CDN may return transient 503/504 for a few immutable packages.
+    # Preserve already downloaded verified .debs between bounded retries.
+    install_ok=0; \
+    for attempt in 1 2 3 4 5 6; do \
+      if apt-get -o Binary::apt::APT::Keep-Downloaded-Packages=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -y install --no-install-recommends "$@"; then \
+        install_ok=1; \
+        break; \
+      fi; \
+      echo "APT transient fetch failure (attempt ${attempt}/6); retrying with cached packages" >&2; \
+      sleep 12; \
+    done; \
+    test "$install_ok" -eq 1; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd --gid 1000 autosubs; \
     useradd --uid 1000 --gid 1000 --home-dir /nonexistent --shell /usr/sbin/nologin autosubs; \
