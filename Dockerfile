@@ -28,29 +28,32 @@ ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_ALLOWED_ROOTS=/data:/media \
     HOME=/tmp \
     XDG_CACHE_HOME=/tmp/.cache
-# Debian slim has no CA bundle before installing ca-certificates; apt verifies
-# the Debian-signed InRelease and package hashes during HTTP bootstrap.
+# Debian slim starts without a CA bundle. Signed, immutable snapshot indices
+# authorize *every* .deb hash; native APT mirror transport retries failed files
+# on ordinary Debian package pools before archived snapshot mirrors. All mirrors
+# are constrained by the same Debian-signed 2026-09-29 Packages index.
 RUN set -eu; \
     rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*; \
-    snapshot_install_ok=0; \
-    for mirror in snapshot-cloudflare.debian.org snapshot-fastly.debian.org snapshot.debian.org; do \
-      printf '%s\n' "deb [check-valid-until=no] http://${mirror}/archive/debian/20260929T000000Z sid main" > /etc/apt/sources.list; \
-      if ! apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o APT::Update::Error-Mode=any update; then \
-        continue; \
-      fi; \
-      set -- ca-certificates curl fontconfig fonts-dejavu-core \
-        ffmpeg=7:9.0.2-1 \
-        mesa-va-drivers=26.2.3-2 \
-        mesa-vulkan-drivers=26.2.3-2; \
-      if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
-        set -- "$@" intel-media-va-driver=26.2.4+dfsg1-1; \
-      fi; \
-      if apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -y install --no-install-recommends "$@"; then \
-        snapshot_install_ok=1; \
-        break; \
-      fi; \
-    done; \
-    test "$snapshot_install_ok" -eq 1; \
+    printf '%s\tpriority:%s type:%s\n' \
+      'http://snapshot-cloudflare.debian.org/archive/debian/20260929T000000Z/' 1 index \
+      'http://snapshot-fastly.debian.org/archive/debian/20260929T000000Z/' 2 index \
+      'http://snapshot.debian.org/archive/debian/20260929T000000Z/' 3 index \
+      'http://deb.debian.org/debian/' 1 deb \
+      'http://ftp.debian.org/debian/' 2 deb \
+      'http://snapshot-cloudflare.debian.org/archive/debian/20260929T000000Z/' 3 deb \
+      'http://snapshot-fastly.debian.org/archive/debian/20260929T000000Z/' 4 deb \
+      'http://snapshot.debian.org/archive/debian/20260929T000000Z/' 5 deb \
+      > /etc/apt/snapshot-mirrors.txt; \
+    printf '%s\n' 'deb [check-valid-until=no] mirror+file:/etc/apt/snapshot-mirrors.txt sid main' > /etc/apt/sources.list; \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=1 -o Acquire::http::Timeout=25 -o APT::Update::Error-Mode=any update; \
+    set -- ca-certificates curl fontconfig fonts-dejavu-core \
+      ffmpeg=7:9.0.2-1 \
+      mesa-va-drivers=26.2.3-2 \
+      mesa-vulkan-drivers=26.2.3-2; \
+    if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+      set -- "$@" intel-media-va-driver=26.2.4+dfsg1-1; \
+    fi; \
+    apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=25 -y install --no-install-recommends "$@"; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd --gid 1000 autosubs; \
     useradd --uid 1000 --gid 1000 --home-dir /nonexistent --shell /usr/sbin/nologin autosubs; \
