@@ -1,17 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
-  import { dictionary } from '$lib/i18n';
-  import type { Asset, Brand, Capabilities, FontFace, Job, Preset, SettingsView, Workflow } from '$lib/types';
-  import AppShell from '$lib/components/AppShell.svelte';
-  import ToastHost from '$lib/components/ToastHost.svelte';
-  import type { Toast } from '$lib/toast';
-  import QueueView from '$lib/views/QueueView.svelte';
-  import EditorView from '$lib/views/EditorView.svelte';
-  import PresetsView from '$lib/views/PresetsView.svelte';
-  import BrandsView from '$lib/views/BrandsView.svelte';
-  import WorkflowsView from '$lib/views/WorkflowsView.svelte';
-  import SettingsViewComponent from '$lib/views/SettingsView.svelte';
+  import { api } from '#lib/api.js';
+  import { dictionary } from '#lib/i18n.js';
+  import type { Asset, Brand, Capabilities, FontFace, Job, Preset, SettingsView, Workflow } from '#lib/types.js';
+  import AppShell from '#lib/components/AppShell.svelte';
+  import ToastHost from '#lib/components/ToastHost.svelte';
+  import type { Toast } from '#lib/toast.js';
+  import QueueView from '#lib/views/QueueView.svelte';
+  import EditorView from '#lib/views/EditorView.svelte';
+  import PresetsView from '#lib/views/PresetsView.svelte';
+  import BrandsView from '#lib/views/BrandsView.svelte';
+  import WorkflowsView from '#lib/views/WorkflowsView.svelte';
+  import SettingsViewComponent from '#lib/views/SettingsView.svelte';
 
   type View = 'queue'|'editor'|'presets'|'brands'|'workflows'|'settings';
   let active:View='queue'; let selectedJobId='';

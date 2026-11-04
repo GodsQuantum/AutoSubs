@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { api } from '$lib/api';
-  import { dictionary } from '$lib/i18n';
-  import { probeSpeachesViaApp } from '$lib/speaches-discovery.js';
-  import type { Capabilities, EncoderKind, SettingsView } from '$lib/types';
+  import { api } from '#lib/api.js';
+  import { dictionary } from '#lib/i18n.js';
+  import { probeSpeachesViaApp } from '#lib/speaches-discovery.js';
+  import type { Capabilities, EncoderKind, SettingsView } from '#lib/types.js';
   export let settings:SettingsView|undefined; export let capabilities:Capabilities|undefined;
   export let refresh:()=>Promise<void>=async()=>{}; export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
   let draft:SettingsView|undefined; let loaded:SettingsView|undefined;

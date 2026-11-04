@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { dictionary } from '$lib/i18n';
-  import type { JobStatus } from '$lib/types';
-  import type { Dictionary } from '$lib/i18n';
+  import { dictionary } from '#lib/i18n.js';
+  import type { JobStatus } from '#lib/types.js';
+  import type { Dictionary } from '#lib/i18n.js';
   export let status: JobStatus = 'pending';
   const labelKey: Record<JobStatus, keyof Dictionary> = {
     pending:'pending', uploading:'uploadingStatus', probing:'probing', transcribing:'transcribing', correcting:'correcting',

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Toast } from '$lib/toast';
+  import type { Toast } from '#lib/toast.js';
   export let toasts: Toast[] = [];
 </script>
 <div class="toast-stack" aria-live="polite">

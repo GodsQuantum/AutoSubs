@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { api } from '$lib/api';
-  import { dictionary } from '$lib/i18n';
-  import { createLatestRequestGate, pathLabel, rootForPath } from '$lib/path-picker.js';
-  import type { BrowseEntry } from '$lib/types';
+  import { api } from '#lib/api.js';
+  import { dictionary } from '#lib/i18n.js';
+  import { createLatestRequestGate, pathLabel, rootForPath } from '#lib/path-picker.js';
+  import type { BrowseEntry } from '#lib/types.js';
   export let open = false;
   export let mode: 'file'|'directory'|'any' = 'any';
   export let initialPath = '';
