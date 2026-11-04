@@ -28,11 +28,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_ALLOWED_ROOTS=/data:/media \
     HOME=/tmp \
     XDG_CACHE_HOME=/tmp/.cache
+# Debian slim has no CA bundle before installing ca-certificates; apt verifies
+# the Debian-signed InRelease and package hashes during HTTP bootstrap.
 RUN set -eu; \
     rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*; \
     snapshot_ready=0; \
     for mirror in snapshot.debian.org snapshot-fastly.debian.org snapshot-cloudflare.debian.org; do \
-      printf '%s\n' "deb [check-valid-until=no] https://${mirror}/archive/debian/20260929T000000Z sid main" > /etc/apt/sources.list; \
+      printf '%s\n' "deb [check-valid-until=no] http://${mirror}/archive/debian/20260929T000000Z sid main" > /etc/apt/sources.list; \
       if apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=2 -o APT::Update::Error-Mode=any update; then \
         snapshot_ready=1; \
         break; \
