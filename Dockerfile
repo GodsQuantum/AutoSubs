@@ -32,28 +32,30 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # the Debian-signed InRelease and package hashes during HTTP bootstrap.
 RUN set -eu; \
     rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*; \
-    snapshot_ready=0; \
-    for mirror in snapshot.debian.org snapshot-fastly.debian.org snapshot-cloudflare.debian.org; do \
+    snapshot_install_ok=0; \
+    for mirror in snapshot-fastly.debian.org snapshot-cloudflare.debian.org snapshot.debian.org; do \
       printf '%s\n' "deb [check-valid-until=no] http://${mirror}/archive/debian/20260929T000000Z sid main" > /etc/apt/sources.list; \
-      if apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=2 -o APT::Update::Error-Mode=any update; then \
-        snapshot_ready=1; \
+      if ! apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=2 -o APT::Update::Error-Mode=any update; then \
+        continue; \
+      fi; \
+      set -- ca-certificates curl fontconfig fonts-dejavu-core \
+        ffmpeg=7:9.0.2-1 \
+        mesa-va-drivers=26.2.3-2 \
+        mesa-vulkan-drivers=26.2.3-2; \
+      if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+        set -- "$@" intel-media-va-driver=26.2.4+dfsg1-1; \
+      fi; \
+      if apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=45 -y install --no-install-recommends "$@"; then \
+        snapshot_install_ok=1; \
         break; \
       fi; \
     done; \
-    test "$snapshot_ready" -eq 1 \
- && apt-get install -y --no-install-recommends \
-      ca-certificates curl fontconfig fonts-dejavu-core \
-      ffmpeg=7:9.0.2-1 \
-      mesa-va-drivers=26.2.3-2 \
-      mesa-vulkan-drivers=26.2.3-2 \
- && if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
-      apt-get install -y --no-install-recommends intel-media-va-driver=26.2.4+dfsg1-1; \
-    fi \
- && rm -rf /var/lib/apt/lists/* \
- && groupadd --gid 1000 autosubs \
- && useradd --uid 1000 --gid 1000 --home-dir /nonexistent --shell /usr/sbin/nologin autosubs \
- && mkdir -p /app/frontend /config /data /fonts /media \
- && chown -R 1000:1000 /config /data /fonts /media
+    test "$snapshot_install_ok" -eq 1; \
+    rm -rf /var/lib/apt/lists/*; \
+    groupadd --gid 1000 autosubs; \
+    useradd --uid 1000 --gid 1000 --home-dir /nonexistent --shell /usr/sbin/nologin autosubs; \
+    mkdir -p /app/frontend /config /data /fonts /media; \
+    chown -R 1000:1000 /config /data /fonts /media
 WORKDIR /app
 COPY --from=builder /src/target/release/autosubs /app/autosubs
 COPY --from=frontend /src/frontend/build /app/frontend
