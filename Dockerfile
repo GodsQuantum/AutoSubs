@@ -28,9 +28,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_ALLOWED_ROOTS=/data:/media \
     HOME=/tmp \
     XDG_CACHE_HOME=/tmp/.cache
-RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
- && printf '%s\n' 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260929T000000Z sid main' > /etc/apt/sources.list \
- && apt-get -o Acquire::Check-Valid-Until=false update \
+RUN set -eu; \
+    rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*; \
+    snapshot_ready=0; \
+    for mirror in snapshot.debian.org snapshot-fastly.debian.org snapshot-cloudflare.debian.org; do \
+      printf '%s\n' "deb [check-valid-until=no] https://${mirror}/archive/debian/20260929T000000Z sid main" > /etc/apt/sources.list; \
+      if apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=2 -o APT::Update::Error-Mode=any update; then \
+        snapshot_ready=1; \
+        break; \
+      fi; \
+    done; \
+    test "$snapshot_ready" -eq 1 \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl fontconfig fonts-dejavu-core \
       ffmpeg=7:9.0.2-1 \
