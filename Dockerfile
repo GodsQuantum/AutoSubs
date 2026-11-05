@@ -45,7 +45,18 @@ RUN set -eu; \
       'http://snapshot.debian.org/archive/debian/20260929T000000Z/' 5 deb \
       > /etc/apt/snapshot-mirrors.txt; \
     printf '%s\n' 'deb [check-valid-until=no] mirror+file:/etc/apt/snapshot-mirrors.txt sid main' > /etc/apt/sources.list; \
-    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=1 -o Acquire::http::Timeout=25 -o APT::Update::Error-Mode=any update; \
+    # APT mirror transport can exhaust all three index mirrors on a short 503 burst.
+    # Retry signed index acquisition independently before downloading packages.
+    index_ok=0; \
+    for index_attempt in 1 2 3 4 5 6; do \
+      if apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=2 -o Acquire::http::Timeout=25 -o APT::Update::Error-Mode=any update; then \
+        index_ok=1; \
+        break; \
+      fi; \
+      echo "APT signed snapshot index unavailable (attempt ${index_attempt}/6)" >&2; \
+      sleep 12; \
+    done; \
+    test "$index_ok" -eq 1; \
     set -- ca-certificates curl fontconfig fonts-dejavu-core \
       ffmpeg=7:9.0.2-1 \
       mesa-va-drivers=26.2.3-2 \
