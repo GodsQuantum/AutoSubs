@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:26.11.1-trixie-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0 AS frontend
+FROM node:26.13.0-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -17,7 +17,7 @@ COPY rust-toolchain.toml ./
 COPY src ./src
 RUN cargo build --release --locked
 
-FROM debian:sid-slim@sha256:1f11c32b03195c1b28c55e4579755659edae5c76dd76a69b4e4fb34c58fa8744 AS runtime
+FROM debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     AUTOSUBS_HOST=0.0.0.0 \
     AUTOSUBS_PORT=3000 \
