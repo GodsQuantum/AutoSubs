@@ -187,6 +187,9 @@ Each Job inherits its outro from the selected Preset (then its Brand). The Edito
 
 Workflows combine low-latency filesystem events with periodic reconciliation. This matters on NFS: a remote write does not necessarily produce the local inotify event you expected.
 
+For editorial pre-burn QA, set `"reviewBeforeRender": true` on a Workflow. Preparation still performs full ASR and strict word alignment, but the job remains **Ready** until its subtitles have been reviewed using `PUT /api/v1/jobs/{id}/subtitles` and explicitly approved by `POST /api/v1/jobs/{id}/render`. No MP4 is rendered or sent to downstream publishers before approval. This optional flag defaults to false for backward compatibility. With strict alignment enabled, recordings longer than 45 seconds are transcribed in bounded 24-second WAV excerpts and assembled with absolute audio boundaries; the aligner still determines word timings.
+
+
 Before claiming a candidate AutoSubs checks that its size/mtime stay stable, probes it with `ffprobe`, deduplicates it persistently, then looks for matching sidecars in priority order:
 
 ```text

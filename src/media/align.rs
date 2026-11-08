@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use futures_util::TryStreamExt;
 use reqwest::{Client, multipart};
-use tokio::fs::File;
+use tokio::{fs::File, process::Command};
 use tokio_util::{io::ReaderStream, sync::CancellationToken};
 
 use crate::domain::{
@@ -185,6 +185,75 @@ fn alignment_segments_json(segments: Option<&[RawSegment]>) -> Option<String> {
     (!rows.is_empty()).then(|| serde_json::Value::Array(rows).to_string())
 }
 
+// Qwen ASR auto-detects the spoken language, but its GGUF/Speaches backend
+// reports "unknown". The acoustic CTC aligner requires an explicit code.
+// If Settings.language is blank, cheaply classify an audio excerpt with the
+// existing local Faster-Whisper-small model. Do not impose French (or guess a
+// language from the transcript). Failure retains the strict fail-closed gate.
+fn validated_detected_language(value: &serde_json::Value) -> Result<String> {
+    let lang = value.get("language").and_then(serde_json::Value::as_str)
+        .unwrap_or("").trim().to_lowercase();
+    if lang.len() < 2 || lang.len() > 12
+        || !lang.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+        || matches!(lang.as_str(), "unknown" | "auto" | "und" | "none")
+    {
+        bail!("language autodetection unavailable: invalid result {lang:?}");
+    }
+    Ok(lang)
+}
+
+async fn detect_alignment_language(
+    audio: &Path,
+    settings: &Settings,
+    client: &Client,
+    token: &CancellationToken,
+) -> Result<String> {
+    let sample = audio.with_extension("autolang.wav");
+    let result = async {
+        let mut command = Command::new("ffmpeg");
+        command.args(["-y", "-v", "error", "-i"]).arg(audio)
+            .args(["-t", "12", "-vn", "-ac", "1", "-ar", "16000",
+                   "-c:a", "pcm_s16le"]).arg(&sample);
+        let ffmpeg = tokio::select! {
+            output = command.output() => output?,
+            _ = token.cancelled() => bail!("language detection cancelled")
+        };
+        if !ffmpeg.status.success() {
+            bail!("language-detection audio extraction failed");
+        }
+        let file = File::open(&sample).await?;
+        let part = multipart::Part::stream(reqwest::Body::wrap_stream(
+            ReaderStream::new(file).map_err(std::io::Error::other)
+        )).file_name("autolang.wav").mime_str("audio/wav")?;
+        let form = multipart::Form::new()
+            .part("file", part)
+            .text("model", "Systran/faster-whisper-small")
+            .text("response_format", "verbose_json");
+        let endpoint = crate::media::transcribe::transcription_endpoint(
+            &settings.local_transcription_url
+        );
+        let mut request = client.post(endpoint).multipart(form);
+        if !settings.local_transcription_api_key.trim().is_empty() {
+            request = request.bearer_auth(&settings.local_transcription_api_key);
+        }
+        let response = tokio::select! {
+            response = request.send() => response?,
+            _ = token.cancelled() => bail!("language detection cancelled")
+        };
+        let status = response.status();
+        let body: serde_json::Value = tokio::select! {
+            body = response.json() => body?,
+            _ = token.cancelled() => bail!("language detection cancelled")
+        };
+        if !status.is_success() {
+            bail!("language detection HTTP {status}: {body}");
+        }
+        validated_detected_language(&body)
+    }.await;
+    let _ = tokio::fs::remove_file(&sample).await;
+    result
+}
+
 async fn request_http_alignment(
     audio: &Path,
     native: &TranscriptTimeline,
@@ -208,10 +277,15 @@ async fn request_http_alignment(
         .collect::<Vec<_>>()
         .join(" ");
 
+    let spoken_language = if settings.language.trim().is_empty() {
+        detect_alignment_language(audio, settings, client, token).await?
+    } else {
+        settings.language.clone()
+    };
     let mut form = multipart::Form::new()
         .part("file", part)
         .text("transcript", transcript)
-        .text("language", settings.language.clone());
+        .text("language", spoken_language);
     if let Some((start, end)) = timeline_bounds(native) {
         form = form
             .text("start", format!("{start:.6}"))
@@ -314,6 +388,15 @@ mod tests {
             ],
             timing_quality: crate::domain::TimingQuality::Exact,
         }
+    }
+
+    #[test]
+    fn autodetected_alignment_language_must_be_nonempty_and_valid() {
+        assert_eq!(validated_detected_language(&serde_json::json!({"language":"fr"})).unwrap(), "fr");
+        assert_eq!(validated_detected_language(&serde_json::json!({"language":"en"})).unwrap(), "en");
+        assert!(validated_detected_language(&serde_json::json!({"language":"unknown"})).is_err());
+        assert!(validated_detected_language(&serde_json::json!({"language":""})).is_err());
+        assert!(validated_detected_language(&serde_json::json!({})).is_err());
     }
 
     #[test]
