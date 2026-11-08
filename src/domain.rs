@@ -453,6 +453,10 @@ pub struct Workflow {
     pub archive_dir: String,
     #[serde(default)]
     pub output_mode: WorkflowOutput,
+    // Require a transcript to pass editorial QA before any subtitle burn.
+    // Prepared jobs remain in Ready; POST /jobs/{id}/render is the native approval.
+    #[serde(default)]
+    pub review_before_render: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brand_id: Option<String>,
     #[serde(default, rename = "brand", skip_serializing_if = "Option::is_none")]

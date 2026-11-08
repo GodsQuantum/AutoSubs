@@ -231,6 +231,15 @@ async fn process_workflow_file(
                 .unwrap_or_else(|| format!("job ended as {:?}", prepared.status))
         ));
     }
+    if workflow.review_before_render {
+        tracing::info!(
+            workflow = %workflow.name,
+            job_id = %job.id,
+            source = %job.original_name,
+            "subtitle transcript ready for review; native renderer held until approval"
+        );
+        return Ok(());
+    }
     jobs::enqueue_render(state.clone(), job.id.clone())?;
     wait_for(&state.clone(), &job.id, supervisor, |status| {
         matches!(

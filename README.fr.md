@@ -179,6 +179,11 @@ Avant de prendre un fichier en charge, AutoSubs vérifie stabilité taille/mtime
 
 Si préparation ou rendu échoue, la source ne bouge pas.
 
+Si le workflow comporte `"reviewBeforeRender": true`, AutoSubs s'arrête **après la transcription et l'alignement** avec un Job en état **Prêt**. Aucun sous-titre n'est incrusté, aucun MP4 n'est exposé au dossier de publication avant validation. L'édition par `PUT /api/v1/jobs/{id}/subtitles`, puis `POST /api/v1/jobs/{id}/render`, utilisent les fonctions natives ; le rendu validé archive ensuite la source normalement. Ce contrôle est optionnel, désactivé par défaut pour préserver les workflows existants.
+
+Sur les audios de plus de 45 secondes avec alignement strict, la transcription est segmentée en plages WAV de 24 secondes puis réassemblée avec leurs **bornes absolues** avant alignement acoustique. Les temps des mots ne sont jamais inventés.
+
+
 ## FFmpeg et accélération matérielle
 
 L'image runtime contient FFmpeg/libass. AutoSubs sonde filtres, hwaccels et encodeurs H.264 au démarrage ; Settings montre ce que **ce conteneur précis** sait utiliser.
