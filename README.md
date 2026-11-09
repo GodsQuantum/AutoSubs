@@ -44,7 +44,7 @@ It is deliberately not a browser-only subtitle toy. The Rust backend owns timing
 - **Server-side picker + favorites** — use files already mounted into the container instead of uploading them again; favorite frequently used folders once and reopen them from a compact shortcut list.
 - **Sidecar-first workflow** — import `.ass`, `.ssa`, `.srt` or AutoSubs JSON; attach, replace or detach a sidecar before rendering.
 - **Transcription providers** — OpenAI-compatible transcription endpoints plus an optional local provider/fallback such as Speaches.
-- **Optional forced alignment** — keep transcription and timing refinement separate: AutoSubs can validate word boundaries returned by a WhisperX-compatible HTTP aligner and safely fall back to native timestamps when alignment is unavailable or invalid.
+- **Optional local word alignment** — Native word timestamps always take priority. AutoSubs can invoke CrispASR only for a text-only or invalid-timing ASR engine, using the small native FastConformer model downloaded once by the upstream registry. No new daemon, aligner HTTP endpoint, or Speaches forced-alignment dependency.
 - **Optional LLM correction** — spelling/punctuation correction after import/transcription while preserving line count and timings.
 - **Canonical subtitle timing engine** — one Rust implementation repairs invalid ranges, overlaps, gaps and word timings. The browser does not maintain a competing copy.
 - **Unicode-aware line grouping** — grapheme counting, Unicode line-break opportunities and French no-break rules instead of UTF-8 byte counting.
@@ -187,7 +187,7 @@ Each Job inherits its outro from the selected Preset (then its Brand). The Edito
 
 Workflows combine low-latency filesystem events with periodic reconciliation. This matters on NFS: a remote write does not necessarily produce the local inotify event you expected.
 
-For editorial pre-burn QA, set `"reviewBeforeRender": true` on a Workflow. Preparation still performs full ASR and strict word alignment, but the job remains **Ready** until its subtitles have been reviewed using `PUT /api/v1/jobs/{id}/subtitles` and explicitly approved by `POST /api/v1/jobs/{id}/render`. No MP4 is rendered or sent to downstream publishers before approval. This optional flag defaults to false for backward compatibility. With strict alignment enabled, recordings longer than 45 seconds are transcribed in bounded 24-second WAV excerpts and assembled with absolute audio boundaries; the aligner still determines word timings.
+For editorial pre-burn QA, set reviewBeforeRender=true on a Workflow. AutoSubs transcribes the full audio in context, validates native word timestamps and, only if enabled and necessary, runs a one-shot local alignment. The job remains Ready until editing through the native subtitles endpoint and explicit rendering approval. No MP4 is passed to downstream publishers before review; the flag defaults to false for backward compatibility. No forced 24-second transcription chunks are used.
 
 
 Before claiming a candidate AutoSubs checks that its size/mtime stay stable, probes it with `ffprobe`, deduplicates it persistently, then looks for matching sidecars in priority order:
@@ -208,11 +208,13 @@ For Intel/AMD Linux acceleration, expose `/dev/dri` to the container and add the
 
 `auto` ranks validated H.264 hardware backends by measured runtime. Differences within 5% are treated as benchmark noise and resolved with a stability-first preference (NVENC, QSV, VA-API, Vulkan, AMF); outside that margin the genuinely faster backend wins. `h264_vulkan` is therefore selected when it survives the sustained 2160×3840 stress benchmark and is meaningfully faster on that machine. If a backend later fails on a real file, AutoSubs tries the next validated hardware backend before falling back to `libx264`. Explicit encoder selections remain explicit. For 4K software rendering, avoid hard 1 GiB container limits: HEVC decode + libass + libx264 can transiently exceed that.
 
-### Optional precision word alignment
+### Optional native word alignment
 
-Native Whisper/faster-whisper word timestamps remain fully supported. For stricter word-by-word timing, enable the alignment stage in **Settings** and provide a compatible HTTP endpoint. AutoSubs sends the accepted transcript plus the original mono audio, validates returned lexical identity/count and monotonic boundaries, and uses native timings automatically if the provider fails validation.
+Native Whisper/faster-whisper and Parakeet word timestamps remain the default. For text-only models (such as Qwen3-ASR), optional alignment is owned by AutoSubs: one CrispASR process per transcription task, with the smallest appropriate language-specific FastConformer-CTC Q4 model (French approximately 70 MB). The upstream registry downloads the model once into the persistent AutoSubs data cache. No extra container or HTTP alignment service runs.
 
-A tested CPU-only WhisperX reference provider lives in [`deploy/whisperx-aligner/`](deploy/whisperx-aligner/). It is optional and deliberately separate from transcription: you can keep Speaches or another OpenAI-compatible ASR provider and use WhisperX only for forced alignment.
+AutoSubs strictly checks transcript lexical identity, word order and acoustic time boundaries. A few native zero-duration clitics may be grouped with the following timed word, without inventing individual timestamps; unreliable data is rejected, or optionally realigned. Subtitle segmentation follows deterministic FR/EN and Unicode syntax rules, not an LLM.
+
+The Linux x86_64 Docker image bundles a pinned CrispASR executable. Native Windows/macOS/Linux desktop clients can use CrispASR from PATH or set AUTOSUBS_ALIGNMENT_EXECUTABLE, but bundling and CI validation of the desktop alignment binary are not yet completed. Native-timestamp ASR works without CrispASR.
 
 ## ⚙️ Configuration
 
@@ -378,7 +380,7 @@ python3 scripts/auto-tune.py --env     # safe settings to copy to existing .env
 - Small computer (2–4 effective threads or below 8 GiB): 1 rendering job and 1 transcription job.
 - Ryzen 7 8845HS with 16 threads and 32 GiB shared container: begin with 2 renders and 2 transcriptions. Raising parallelism without benchmarks can slow both tasks.
 - With FFmpeg video, only use VAAPI/NVENC after **a real file encode test** confirms the GPU device, output resolution, burned subtitle pixels and acceptable quality. Merely listing an FFmpeg encoder is not proof of acceleration.
-- In Settings, pair a reachable OpenAI-compatible Speaches /v1 endpoint and probe real models. For word-level subtitles, test the aligner; not all Whisper, Qwen3-ASR and Nemotron models return the same native timestamps. Compare a real short video, SRT, and rendered video before watch-folder automation.
+- In Settings, configure an OpenAI-compatible transcription service such as Speaches and test real models. Prefer native word timestamps; enable the optional one-shot local aligner only when needed. Test the SRT and burned video on a real clip before enabling automatic publication.
 
 Use a protected reverse proxy for remote access; Docker defaults to 127.0.0.1. Stored UI preferences may take precedence over first-boot .env settings. Hardware detection is an **advisory starting profile, not an automatic GPU switch or certified speed gain**.
 

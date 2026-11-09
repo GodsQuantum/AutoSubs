@@ -71,6 +71,19 @@ pub fn generate_srt_content(lines: &[SubtitleLine]) -> String {
     out
 }
 
+// Export exactly what the renderer displays: ASS applies Preset.uppercase,
+// so the SRT sidecar must apply the same display transform as well.
+pub fn generate_display_srt_content(lines: &[SubtitleLine], uppercase: bool) -> String {
+    if !uppercase {
+        return generate_srt_content(lines);
+    }
+    let mut displayed = lines.to_vec();
+    for line in &mut displayed {
+        line.text = line.text.to_uppercase();
+    }
+    generate_srt_content(&displayed)
+}
+
 fn ass_time(value: &str) -> Option<f64> {
     let mut parts = value.trim().split(':');
     let h: f64 = parts.next()?.parse().ok()?;
@@ -143,6 +156,27 @@ pub fn lines_from_words(words: Vec<SubtitleWord>) -> Vec<SubtitleLine> {
             words: Some(vec![word]),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod displayed_srt_export_regression {
+    use super::*;
+    #[test]
+    fn rendered_uppercase_preset_has_matching_srt_display_case() {
+        let lines = vec![SubtitleLine {
+            id: 0,
+            start: 0.08,
+            end: 1.42,
+            text: "Teddy Riner\nse sont sentis vexés".into(),
+            words: None,
+        }];
+        let upper = generate_display_srt_content(&lines, true);
+        assert!(upper.contains("TEDDY RINER\nSE SONT SENTIS VEXÉS"));
+        assert!(!upper.contains("Teddy Riner"));
+        let normal = generate_display_srt_content(&lines, false);
+        assert!(normal.contains("Teddy Riner\nse sont sentis vexés"));
+        assert_eq!(normal, generate_srt_content(&lines));
+    }
 }
 
 #[cfg(test)]

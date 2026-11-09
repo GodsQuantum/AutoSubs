@@ -712,6 +712,9 @@ pub struct Job {
     pub timing_quality: Option<TimingQuality>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timing_fallback: Option<String>,
+    /// Confirmed no-fallback local ASR model, not a mere settings snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcription_model: Option<String>,
     #[serde(default)]
     pub format: FormatProfile,
     #[serde(default)]

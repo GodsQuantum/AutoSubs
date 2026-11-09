@@ -209,10 +209,17 @@ async fn process_workflow_file(
         .find(|p| p.exists());
     let job = jobs::create_job(
         state,
-        original_name,
+        original_name.clone(),
         path.to_path_buf(),
         sidecar,
-        workflow.preset_id.clone(),
+        {
+            let presets = state.presets.read().await;
+            jobs::workflow_preset_for_filename(
+                &original_name,
+                &presets,
+                workflow.preset_id.as_deref(),
+            )?
+        },
         Some(workflow),
     )?;
     jobs::enqueue_prepare(state.clone(), job.id.clone())?;

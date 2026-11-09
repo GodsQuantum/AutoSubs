@@ -12,8 +12,8 @@ use std::{
 };
 
 const MODEL_PREFS: &[&str] = &[
-    "handy-computer/whisper-large-v3-turbo-gguf",
     "deepdml/faster-whisper-large-v3-turbo-ct2",
+    "Systran/faster-whisper-large-v3",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -158,12 +158,11 @@ pub async fn probe(Json(request): Json<ProbeRequest>) -> AppResult<Json<ProbeRes
     let client = pinned_client(&hostname, port).await?;
     let health = read_json(&client, &origin, "/health").await?;
     let models = read_json(&client, &origin, "/v1/models").await?;
-    let alignment = read_json(&client, &origin, "/v1/audio/alignment/health").await?;
     let speaches_healthy = health.get("status").and_then(Value::as_str) == Some("ok")
         || health.get("message").and_then(Value::as_str) == Some("OK");
-    if !speaches_healthy || alignment.get("status").and_then(Value::as_str) != Some("ok") {
+    if !speaches_healthy {
         return Err(AppError::BadRequest(
-            "Speaches or its alignment engine is not healthy".into(),
+            "Cloud9-Speaches is not healthy".into(),
         ));
     }
     let ids = models
@@ -177,33 +176,14 @@ pub async fn probe(Json(request): Json<ProbeRequest>) -> AppResult<Json<ProbeRes
                 .any(|item| item.get("id").and_then(Value::as_str) == Some(**preference))
         })
         .ok_or_else(|| AppError::BadRequest("No supported Whisper Turbo model available".into()))?;
-    let ready = alignment
-        .get("models")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                item.get("id").and_then(Value::as_str) == Some("fastconformer-fr-q4")
-                    && item.get("available").and_then(Value::as_bool) == Some(true)
-            })
-        });
-    if !ready {
-        return Err(AppError::BadRequest(
-            "FastConformer French acoustic aligner unavailable".into(),
-        ));
-    }
     Ok(Json(ProbeResponse {
         transcription_url: format!("{origin}/v1/audio/transcriptions"),
-        alignment_url: format!("{origin}/align"),
+        alignment_url: String::new(),
         origin,
         model: (*model).to_owned(),
-        alignment_model: "fastconformer-fr-q4",
-        backend: alignment
-            .get("backend")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_owned(),
-        backend_verified: alignment.get("backend_selection").and_then(Value::as_str)
-            != Some("configured_not_hardware_probed"),
+        alignment_model: "",
+        backend: "whisper-native-words".to_owned(),
+        backend_verified: false, // Model metadata alone does not prove word timing.
     }))
 }
 

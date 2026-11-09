@@ -1,6 +1,6 @@
 const MODEL_PREFS = [
-  'handy-computer/whisper-large-v3-turbo-gguf',
   'deepdml/faster-whisper-large-v3-turbo-ct2',
+  'Systran/faster-whisper-large-v3',
 ];
 
 /** @param {string} value */
@@ -36,26 +36,22 @@ async function readJson(endpoint, fetcher) {
 /** @param {string} value @param {typeof fetch} [fetcher] */
 export async function probeSpeaches(value, fetcher = fetch) {
   const origin = normalizeSpeachesUrl(value);
-  const [health, models, alignment] = await Promise.all([
+  const [health, models] = await Promise.all([
     readJson(origin + '/health', fetcher),
     readJson(origin + '/v1/models', fetcher),
-    readJson(origin + '/v1/audio/alignment/health', fetcher),
   ]);
   if (!health || !Array.isArray(models?.data)) throw new Error('Invalid Cloud9-Speaches API response');
   const ids = /** @type {{id?:string}[]} */ (models.data).map(x => x?.id).filter(x => typeof x === 'string');
   const model = MODEL_PREFS.find(x => ids.includes(x));
   if (!model) throw new Error('No supported Whisper Turbo model is installed');
-  if (alignment?.status !== 'ok' || !/** @type {{id:string,available:boolean}[]} */ (alignment.models)?.some(x => x?.id === 'fastconformer-fr-q4' && x?.available)) {
-    throw new Error('FastConformer acoustic alignment is not available');
-  }
   return {
     origin,
     transcriptionUrl: origin + '/v1/audio/transcriptions',
-    alignmentUrl: origin + '/align',
+    alignmentUrl: '',
     model,
-    alignmentModel: 'fastconformer-fr-q4',
-    backend: alignment.backend || 'unknown',
-    backendVerified: alignment.backend_selection !== 'configured_not_hardware_probed',
+    alignmentModel: '',
+    backend: 'whisper-native-words',
+    backendVerified: false,
   };
 }
 
