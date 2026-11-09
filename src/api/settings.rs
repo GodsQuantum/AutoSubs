@@ -44,10 +44,10 @@ impl From<&Settings> for SettingsView {
             local_transcription_model: s.local_transcription_model.clone(),
             local_transcription_api_key_set: !s.local_transcription_api_key.is_empty(),
             alignment_enabled: s.alignment_enabled,
-            alignment_required: s.alignment_required,
-            alignment_url: s.alignment_url.clone(),
+            alignment_required: false,
+            alignment_url: String::new(),
             alignment_model: s.alignment_model.clone(),
-            alignment_api_key_set: !s.alignment_api_key.is_empty(),
+            alignment_api_key_set: false,
             llm_enabled: s.llm_enabled,
             llm_endpoint: s.llm_endpoint.clone(),
             llm_model: s.llm_model.clone(),
@@ -129,9 +129,11 @@ pub async fn update_settings(
     settings.local_fallback_enabled = body.local_fallback_enabled;
     settings.local_transcription_url = body.local_transcription_url;
     settings.local_transcription_model = body.local_transcription_model;
+    // The optional model is launched exclusively by AutoSubs as a short-lived
+    // local subprocess. Legacy external alignment endpoints are ignored.
     settings.alignment_enabled = body.alignment_enabled;
-    settings.alignment_required = body.alignment_required;
-    settings.alignment_url = body.alignment_url;
+    settings.alignment_required = false;
+    settings.alignment_url.clear();
     settings.alignment_model = body.alignment_model;
     settings.llm_enabled = body.llm_enabled;
     settings.llm_endpoint = body.llm_endpoint;
@@ -167,6 +169,8 @@ pub async fn update_settings_legacy(
     if incoming.local_transcription_api_key.is_empty() {
         incoming.local_transcription_api_key = current.local_transcription_api_key.clone();
     }
+    incoming.alignment_required = false;
+    incoming.alignment_url.clear();
     if incoming.alignment_api_key.is_empty() {
         incoming.alignment_api_key = current.alignment_api_key.clone();
     }
@@ -251,7 +255,7 @@ mod model_endpoint_regression_tests {
     }
 
     #[test]
-    fn settings_view_exposes_alignment_without_leaking_secret() {
+    fn optional_local_alignment_never_advertises_external_endpoint_or_secrets() {
         let settings = Settings {
             alignment_enabled: true,
             alignment_url: "http://aligner.local/align".into(),
@@ -263,9 +267,10 @@ mod model_endpoint_regression_tests {
         let view = SettingsView::from(&settings);
 
         assert!(view.alignment_enabled);
-        assert_eq!(view.alignment_url, "http://aligner.local/align");
+        assert!(!view.alignment_required);
+        assert_eq!(view.alignment_url, "");
         assert_eq!(view.alignment_model, "fr-aligner");
-        assert!(view.alignment_api_key_set);
+        assert!(!view.alignment_api_key_set);
     }
 
     #[tokio::test]
