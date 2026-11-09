@@ -2,7 +2,7 @@ use crate::domain::{
     Asset, Brand, Job, JobOutro, JobStatus, Preset, RawWord, RenderProfile, SubtitleLine,
     TimingQuality, TranscriptTimeline, TranscriptionResponse, Workflow, WorkflowOutput,
 };
-use crate::media::align::{align_timeline_with_segments, timeline_as_transcription};
+use crate::media::optional_alignment::align_transcript_on_demand;
 use crate::media::process::ProcessError;
 use crate::media::transcribe::{TranscriptionError, extract_audio, transcribe_audio};
 use crate::media::{build_render_plan, probe_media, render_video, resolve_render_policy};
@@ -19,7 +19,7 @@ use crate::subtitle::{
     normalize_subtitles,
     segment::LayoutOptions,
     segment::transcript_timeline,
-    srt::{generate_srt_content, parse_ass_to_lines, parse_srt_to_lines},
+    srt::{generate_display_srt_content, parse_ass_to_lines, parse_srt_to_lines},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use std::hash::{Hash, Hasher};
@@ -79,6 +79,7 @@ pub fn create_job(
         resolved_brand_id: None,
         timing_quality: None,
         timing_fallback: None,
+        transcription_model: None,
         render_profile: crate::domain::RenderProfile::Auto,
         last_render_encoder: None,
         last_render_elapsed_ms: None,
@@ -221,6 +222,122 @@ async fn cancellable_permit(
     }
 }
 
+// Strict acoustic synchronization gate: never infer synthetic timestamps
+// from un-timed speech, and never substitute forced-alignment words.
+fn validated_native_word_timeline(
+    transcription: &TranscriptionResponse,
+    media_duration: f64,
+) -> Result<TranscriptTimeline> {
+    let native = transcription
+        .words
+        .as_ref()
+        .filter(|words| !words.is_empty())
+        .ok_or_else(|| {
+            anyhow!(
+                "the selected ASR engine has no native word timestamps; \
+             use a word-timestamp-capable model (Faster-Whisper)"
+            )
+        })?;
+    if !media_duration.is_finite() || media_duration <= 0.0 {
+        bail!("invalid source audio duration");
+    }
+    let mut grouped = Vec::<RawWord>::with_capacity(native.len());
+    let mut pending = Vec::<String>::new();
+    let mut pending_at = None::<f64>;
+    let mut previous_end = 0.0_f64;
+    let mut repaired = 0_usize;
+    for (idx, word) in native.iter().enumerate() {
+        let text = word.word.as_deref().unwrap_or("").trim();
+        let (Some(start), Some(end)) = (word.start, word.end) else {
+            bail!("missing native timestamp at word {idx}");
+        };
+        if text.is_empty()
+            || !start.is_finite()
+            || !end.is_finite()
+            || start < 0.0
+            || end < start
+            || end > media_duration + 0.50
+        {
+            bail!("invalid native timestamp at word {idx}: {start}..{end}");
+        }
+        if end == start {
+            if pending_at.is_some_and(|prior| (prior - start).abs() > 0.15) || pending.len() > 3 {
+                bail!("too many unanchored native words at word {idx}");
+            }
+            if pending_at.is_none() {
+                pending_at = Some(start);
+            }
+            pending.push(text.to_owned());
+            repaired += 1;
+            continue;
+        }
+        if pending_at.is_some_and(|zero_at| (zero_at - start).abs() > 0.15) {
+            bail!("zero-duration native words are not adjacent to timed speech at word {idx}");
+        }
+        if !grouped.is_empty() && start + 0.04 < previous_end {
+            bail!("non-monotonic native word timestamps at word {idx}");
+        }
+        let mut joined = String::new();
+        for part in pending.drain(..).chain(std::iter::once(text.to_owned())) {
+            if !joined.is_empty()
+                && !part.starts_with(['\'', '’', '-'])
+                && !joined.ends_with(['\'', '’', '-'])
+            {
+                joined.push(' ');
+            }
+            joined.push_str(&part);
+        }
+        pending_at = None;
+        grouped.push(RawWord {
+            word: Some(joined),
+            start: Some(start),
+            end: Some(end),
+        });
+        previous_end = end;
+    }
+    if !pending.is_empty() {
+        bail!("transcript ends with untimed words; refusing guessed final timestamps");
+    }
+    // Whisper/CT2 can produce about 6% zero-duration clitics on rapid French
+    // speech (17 / 298 measured on the "La peine de mort" reel). Group only
+    // acoustically adjacent zero-span words with the following timed word;
+    // preserve lexical identity, and mark timing inferred for that group.
+    // Reject clips beyond 10% rather than arbitrarily failing healthy CT2.
+    if repaired * 10 > native.len() {
+        bail!(
+            "more than 10% of native words lack durations ({repaired}/{})",
+            native.len()
+        );
+    }
+    let letters = |tokens: &[RawWord]| -> String {
+        tokens
+            .iter()
+            .filter_map(|w| w.word.as_ref())
+            .flat_map(|w| w.chars())
+            .filter(|ch| ch.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
+    if letters(native) != letters(&grouped) {
+        bail!("native word grouping altered recognized text");
+    }
+    let canonical = TranscriptionResponse {
+        text: transcription.text.clone(),
+        words: Some(grouped),
+        segments: None,
+    };
+    let mut timeline = transcript_timeline(&canonical);
+    if timeline.timing_quality != TimingQuality::Exact || timeline.words.is_empty() {
+        bail!("native transcript changed or inferred word timing");
+    }
+    if repaired > 0 {
+        // Timed groups are native; individual zero-span clitic timings are
+        // unavailable, so avoid presenting every word as independently exact.
+        timeline.timing_quality = TimingQuality::Inferred;
+    }
+    Ok(timeline)
+}
+
 async fn prepare_job(
     state: &AppState,
     id: &str,
@@ -282,34 +399,76 @@ async fn prepare_job(
                 return Err(e.into());
             }
         };
-        let native_timeline = transcript_timeline(&transcription);
-        let alignment = align_timeline_with_segments(
-            &audio,
-            &native_timeline,
-            transcription.segments.as_deref(),
-            &settings,
-            &state.http,
-            token,
-        )
-        .await;
-        let _ = tokio::fs::remove_file(&audio).await;
-        if token.is_cancelled() {
-            bail!("cancelled");
-        }
-        if settings.alignment_enabled && settings.alignment_required {
-            if let Some(reason) = &alignment.fallback_reason {
-                bail!("strict acoustic word alignment failed: {reason}");
+        // Provenance is verified only when ASR cannot silently fall back.
+        let verified_model =
+            if settings.local_transcription_enabled && !settings.local_fallback_enabled {
+                Some(settings.local_transcription_model.clone())
+            } else {
+                None
+            };
+        update_job(state, id, |job| job.transcription_model = verified_model)?;
+        // Prefer validated native timestamps unconditionally. If a model
+        // provides text only OR its native word timing fails validation,
+        // optionally invoke AutoSubs' own one-shot aligner. It is never
+        // allowed to rewrite the ASR transcript or run for valid native words.
+        let native_validation = validated_native_word_timeline(&transcription, probe.duration);
+        let original_text = transcription.text.clone();
+        let aligned = if native_validation.is_err() && settings.alignment_enabled {
+            if probe.duration > 240.0 {
+                bail!("optional alignment currently supports clips up to 240 seconds");
             }
-            if alignment.timeline.timing_quality != TimingQuality::Aligned {
-                bail!("strict acoustic word alignment required but was not obtained");
-            }
-        }
-        let timing_fallback = alignment.fallback_reason.clone();
-        persist_transcript(state, id, &alignment.timeline)?;
+            Some(
+                align_transcript_on_demand(
+                    &audio,
+                    &transcription,
+                    &settings.alignment_model,
+                    &settings.language,
+                    token,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let native_timeline = match aligned.as_ref() {
+            Some(forced) => validated_native_word_timeline(forced, probe.duration)?,
+            None => native_validation?,
+        };
+        let timed = aligned.as_ref().unwrap_or(&transcription);
+        persist_transcript(state, id, &native_timeline)?;
+        let source_note = if aligned.is_some() {
+            Some(format!(
+                "Optional AutoSubs-only forced alignment; original ASR text preserved; {} / {} word spans coalesced",
+                timed
+                    .words
+                    .as_ref()
+                    .map_or(0, |v| v.iter().filter(|w| w.start == w.end).count()),
+                timed.words.as_ref().map_or(0, Vec::len)
+            ))
+        } else if native_timeline.timing_quality == TimingQuality::Inferred {
+            Some("Native word timestamps contain zero-duration clitics; grouped without invented times".to_owned())
+        } else {
+            None
+        };
+        let native_timing_note = source_note;
         update_job(state, id, move |job| {
-            job.timing_fallback = timing_fallback;
+            job.timing_fallback = native_timing_note;
         })?;
-        let effective_transcription = timeline_as_transcription(&alignment.timeline);
+        let effective_transcription = TranscriptionResponse {
+            text: original_text,
+            words: Some(
+                native_timeline
+                    .words
+                    .iter()
+                    .map(|word| RawWord {
+                        word: Some(word.word.clone()),
+                        start: Some(word.start),
+                        end: Some(word.end),
+                    })
+                    .collect(),
+            ),
+            segments: None,
+        };
         let raw_path = state.config.work_dir().join(format!("{id}_words.json"));
         tokio::fs::write(
             &raw_path,
@@ -644,7 +803,11 @@ async fn render_job(state: &AppState, id: &str, token: &CancellationToken) -> Re
         cleanup.track(staged.clone());
         match kind {
             SidecarKind::Srt => {
-                tokio::fs::write(&staged, generate_srt_content(&lines)).await?;
+                tokio::fs::write(
+                    &staged,
+                    generate_display_srt_content(&lines, preset.uppercase),
+                )
+                .await?;
             }
             SidecarKind::Ass => {
                 tokio::fs::write(&staged, ass.as_bytes()).await?;
@@ -1018,6 +1181,31 @@ pub struct ResolvedPreset {
     pub brand_id: Option<String>,
 }
 
+pub(crate) fn workflow_preset_for_filename(
+    filename: &str,
+    presets: &[Preset],
+    fallback: Option<&str>,
+) -> Result<Option<String>> {
+    let mut matches = presets
+        .iter()
+        .filter_map(|p| {
+            keyword_match_score(filename, p.match_keywords.as_deref()).map(|score| (score, p))
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|(a, ap), (b, bp)| b.cmp(a).then_with(|| ap.id.cmp(&bp.id)));
+    if let Some((top, p)) = matches.first() {
+        if matches
+            .iter()
+            .skip(1)
+            .any(|(score, x)| score == top && x.id != p.id)
+        {
+            bail!("ambiguous filename preset match for {filename}");
+        }
+        return Ok(Some(p.id.clone()));
+    }
+    Ok(fallback.map(str::to_owned))
+}
+
 fn keyword_match_score(filename: &str, keywords: Option<&str>) -> Option<usize> {
     let lower = filename.to_lowercase();
     keywords?
@@ -1080,7 +1268,10 @@ pub async fn resolve_effective_preset(
 ) -> Result<ResolvedPreset> {
     let presets = state.presets.read().await.clone();
     let brands = state.brands.read().await.clone();
-    let brand = resolve_brand(&brands, filename, workflow)?;
+    // Filename-matched show presets override the generic watcher's brand.
+    let scoped_workflow =
+        workflow.filter(|w| requested.is_none_or(|id| w.preset_id.as_deref() == Some(id)));
+    let brand = resolve_brand(&brands, filename, scoped_workflow)?;
 
     let explicit_id = requested.or_else(|| workflow.and_then(|value| value.preset_id.as_deref()));
     let mut preset =
@@ -1979,6 +2170,212 @@ mod tests {
         assert_eq!(updated.lines.as_ref().unwrap().len(), 2);
         assert_eq!(updated.lines.as_ref().unwrap()[0].text, "un");
         assert_eq!(updated.lines.as_ref().unwrap()[1].text, "deux");
+    }
+
+    #[test]
+    fn native_word_timestamps_preserve_asr_lexemes_without_external_aligner() {
+        let transcript = TranscriptionResponse {
+            text: Some("Teddy Riner et CNews se sont vexés".into()),
+            words: Some(vec![
+                RawWord {
+                    word: Some("Teddy".into()),
+                    start: Some(0.08),
+                    end: Some(0.38),
+                },
+                RawWord {
+                    word: Some("Riner".into()),
+                    start: Some(0.38),
+                    end: Some(0.72),
+                },
+                RawWord {
+                    word: Some("et".into()),
+                    start: Some(0.80),
+                    end: Some(0.95),
+                },
+                RawWord {
+                    word: Some("CNews".into()),
+                    start: Some(1.00),
+                    end: Some(1.35),
+                },
+                RawWord {
+                    word: Some("se".into()),
+                    start: Some(1.40),
+                    end: Some(1.55),
+                },
+                RawWord {
+                    word: Some("sont".into()),
+                    start: Some(1.55),
+                    end: Some(1.75),
+                },
+                RawWord {
+                    word: Some("vexés".into()),
+                    start: Some(1.75),
+                    end: Some(2.18),
+                },
+            ]),
+            segments: None,
+        };
+        let timeline = validated_native_word_timeline(&transcript, 2.40).unwrap();
+        assert_eq!(timeline.timing_quality, TimingQuality::Exact);
+        assert_eq!(timeline.words.len(), 7);
+        assert_eq!(timeline.words[0].word, "Teddy");
+        assert_eq!(timeline.words[1].word, "Riner");
+        assert_eq!(timeline.words[3].word, "CNews");
+        assert_eq!(timeline.words[6].word, "vexés");
+    }
+
+    #[test]
+    fn coalesce_zero_span_whisper_clitics_without_inventing_times_or_words() {
+        let src = TranscriptionResponse {
+            text: Some("C'est qu'il y a un mec. Mais souvent.".into()),
+            words: Some(vec![
+                RawWord {
+                    word: Some(" C".into()),
+                    start: Some(0.0),
+                    end: Some(0.0),
+                },
+                RawWord {
+                    word: Some("'est".into()),
+                    start: Some(0.0),
+                    end: Some(0.2),
+                },
+                RawWord {
+                    word: Some(" qu".into()),
+                    start: Some(0.3),
+                    end: Some(0.4),
+                },
+                RawWord {
+                    word: Some("'il".into()),
+                    start: Some(0.4),
+                    end: Some(0.5),
+                },
+                RawWord {
+                    word: Some(" y".into()),
+                    start: Some(0.5),
+                    end: Some(0.5),
+                },
+                RawWord {
+                    word: Some(" a".into()),
+                    start: Some(0.5),
+                    end: Some(0.5),
+                },
+                RawWord {
+                    word: Some(" un".into()),
+                    start: Some(0.5),
+                    end: Some(0.7),
+                },
+                RawWord {
+                    word: Some(" mec.".into()),
+                    start: Some(0.7),
+                    end: Some(0.95),
+                },
+                RawWord {
+                    word: Some(" Mais".into()),
+                    start: Some(1.0),
+                    end: Some(1.0),
+                },
+                RawWord {
+                    word: Some(" souvent.".into()),
+                    start: Some(1.0),
+                    end: Some(1.45),
+                },
+            ]),
+            segments: None,
+        };
+        // 4/10 is intentionally above the production 5% maximum; include
+        // native filler speech to represent a real multi-sentence clip.
+        let mut realistic = src.clone();
+        for idx in 0..120 {
+            realistic.words.as_mut().unwrap().push(RawWord {
+                word: Some(format!("suite{idx}")),
+                start: Some(1.5 + idx as f64 * 0.10),
+                end: Some(1.55 + idx as f64 * 0.10),
+            });
+        }
+        let timeline = validated_native_word_timeline(&realistic, 14.0).unwrap();
+        assert_eq!(timeline.timing_quality, TimingQuality::Inferred);
+        assert_eq!(timeline.words[0].word, "C'est");
+        assert_eq!(timeline.words[0].start, 0.0);
+        assert_eq!(timeline.words[0].end, 0.2);
+        assert_eq!(timeline.words[3].word, "y a un");
+        assert_eq!(timeline.words[3].start, 0.5);
+        assert_eq!(timeline.words[3].end, 0.7);
+        assert!(timeline.words.iter().any(|w| w.word == "Mais souvent."));
+        assert!(validated_native_word_timeline(&src, 3.0).is_err());
+    }
+
+    #[test]
+    fn realistic_french_ct2_six_percent_zero_spans_remains_usable() {
+        // Reproduce 17/298 zero-duration acoustic words from a real reel.
+        // All zero words are colocated with the next valid acoustic word.
+        let size = 298_usize;
+        let mut words = Vec::with_capacity(size);
+        for i in 0..size {
+            let is_zero = (0..17).any(|k| i == 3 + 17 * k);
+            let start = if is_zero {
+                (i + 1) as f64 * 0.20
+            } else {
+                i as f64 * 0.20
+            };
+            let end = if is_zero {
+                start
+            } else {
+                (i + 1) as f64 * 0.20
+            };
+            words.push(RawWord {
+                word: Some(format!("mot{i}")),
+                start: Some(start),
+                end: Some(end),
+            });
+        }
+        let source = TranscriptionResponse {
+            text: None,
+            words: Some(words.clone()),
+            segments: None,
+        };
+        let result = validated_native_word_timeline(&source, 65.0).unwrap();
+        assert_eq!(result.timing_quality, TimingQuality::Inferred);
+        assert_eq!(result.words.len(), size - 17);
+        let original = words
+            .iter()
+            .filter_map(|w| w.word.as_deref())
+            .flat_map(str::chars)
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>();
+        let preserved = result
+            .words
+            .iter()
+            .flat_map(|w| w.word.chars())
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>();
+        assert_eq!(original, preserved);
+    }
+
+    #[test]
+    fn wordless_or_unreliable_asr_must_fail_closed() {
+        let text_only = TranscriptionResponse {
+            text: Some("Teddy Riner".into()),
+            words: None,
+            segments: None,
+        };
+        assert!(validated_native_word_timeline(&text_only, 85.78).is_err());
+        let invalid = TranscriptionResponse {
+            text: Some("Bonjour monde".into()),
+            words: Some(vec![
+                RawWord {
+                    word: Some("Bonjour".into()),
+                    start: Some(2.0),
+                    end: Some(3.0),
+                },
+                RawWord {
+                    word: Some("monde".into()),
+                    start: Some(0.3),
+                    end: Some(0.5),
+                },
+            ]),
+            segments: None,
+        };
+        assert!(validated_native_word_timeline(&invalid, 5.0).is_err());
     }
 
     #[test]
