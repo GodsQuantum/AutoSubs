@@ -81,6 +81,16 @@ RUN set -eu; \
     useradd --uid 1000 --gid 1000 --home-dir /nonexistent --shell /usr/sbin/nologin autosubs; \
     mkdir -p /app/frontend /config /data /fonts /media; \
     chown -R 1000:1000 /config /data /fonts /media
+# Optional, one-shot word alignment for text-only ASR engines. Immutable
+# upstream Vulkan release, digest verified by Docker BuildKit (v0.8.53).
+# The model itself is stored separately under /data/models and never
+# loaded when an ASR engine already supplies native word timestamps.
+ADD --checksum=sha256:0992449c05b6dd1fc38351b171d510912d4c48037f934995ca8015fbaaad4f67 https://github.com/CrispStrobe/CrispASR/releases/download/v0.8.53/crispasr-linux-x86_64-vulkan.tar.gz /tmp/crispasr-vulkan.tar.gz
+RUN mkdir -p /opt/crispasr && \
+    tar -xzf /tmp/crispasr-vulkan.tar.gz -C /opt/crispasr --strip-components=1 && \
+    rm -f /tmp/crispasr-vulkan.tar.gz && \
+    LD_LIBRARY_PATH=/opt/crispasr /opt/crispasr/crispasr --version | grep -F '0.8.53'
+ENV LD_LIBRARY_PATH=/opt/crispasr
 WORKDIR /app
 COPY --from=builder /src/target/release/autosubs /app/autosubs
 COPY --from=frontend /src/frontend/build /app/frontend

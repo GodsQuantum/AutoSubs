@@ -7,7 +7,7 @@
   export let refresh:()=>Promise<void>=async()=>{}; export let notify:(type:'error'|'success'|'info',message:string)=>void=()=>{};
   let draft:SettingsView|undefined; let loaded:SettingsView|undefined;
   $: form = draft as SettingsView;
-  let transKey='';let transAction:'keep'|'replace'|'clear'='keep';let localKey='';let localAction:'keep'|'replace'|'clear'='keep';let alignKey='';let alignAction:'keep'|'replace'|'clear'='keep';let llmKey='';let llmAction:'keep'|'replace'|'clear'='keep';
+  let transKey='';let transAction:'keep'|'replace'|'clear'='keep';let localKey='';let localAction:'keep'|'replace'|'clear'='keep';let llmKey='';let llmAction:'keep'|'replace'|'clear'='keep';
   let saving=false;let primaryModels:string[]=[];let localModels:string[]=[];
   let speachesAddress = 'http://127.0.0.1:8005';
   let speachesBusy = false;
@@ -19,11 +19,9 @@
       const found = await probeSpeachesViaApp(speachesAddress);
       const previous: SettingsView = JSON.parse(JSON.stringify(loaded));
       const next: SettingsView = {
-        ...previous, localTranscriptionEnabled: true, localFallbackEnabled: true,
+        ...previous, localTranscriptionEnabled: true, localFallbackEnabled: false,
         localTranscriptionUrl: found.transcriptionUrl,
-        localTranscriptionModel: found.model,
-        alignmentEnabled: true, alignmentRequired: true,
-        alignmentUrl: found.alignmentUrl, alignmentModel: found.alignmentModel
+        localTranscriptionModel: found.model
       };
       // Preserve all secret keys and the existing primary/OmniRoute provider.
       await api.saveSettings(next);
@@ -41,14 +39,14 @@
       await api.saveSettings(speachesPrevious);
       speachesPrevious = undefined;
       await refresh();
-      notify('success', 'Previous transcription and alignment settings restored.');
+      notify('success', 'Previous transcription settings restored.');
     } catch (error) {
       notify('error', error instanceof Error ? error.message : String(error));
     } finally { speachesBusy = false; }
   }
-  $: if(settings&&settings!==loaded){loaded=settings;draft=JSON.parse(JSON.stringify(settings));transKey='';localKey='';llmKey='';alignKey='';transAction=localAction=llmAction=alignAction='keep'}
+  $: if(settings&&settings!==loaded){loaded=settings;draft=JSON.parse(JSON.stringify(settings));transKey='';localKey='';llmKey='';transAction=localAction=llmAction='keep'}
   const secret=(action:string,value:string)=>action==='keep'?undefined:{action,value};
-  async function save(){if(!draft)return;saving=true;try{await api.saveSettings({...draft,transcriptionApiKey:secret(transAction,transKey),localTranscriptionApiKey:secret(localAction,localKey),alignmentApiKey:secret(alignAction,alignKey),llmApiKey:secret(llmAction,llmKey)});await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}finally{saving=false}}
+  async function save(){if(!draft)return;saving=true;try{await api.saveSettings({...draft,transcriptionApiKey:secret(transAction,transKey),localTranscriptionApiKey:secret(localAction,localKey),llmApiKey:secret(llmAction,llmKey)});await refresh();notify('success',$dictionary.saved)}catch(e){notify('error',e instanceof Error?e.message:String(e))}finally{saving=false}}
   async function models(kind:'primary'|'local'){if(!draft)return;try{const endpoint=kind==='primary'?draft.transcriptionUrl:draft.localTranscriptionUrl;const key=kind==='primary'?transKey:localKey;const result=await api.models(endpoint,key);if(kind==='primary')primaryModels=result.models;else localModels=result.models}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
   const yes=(v:boolean|undefined)=>v?$dictionary.available:$dictionary.unavailable;
   const encoderName=(kind:EncoderKind|undefined)=>{
@@ -66,11 +64,11 @@
   <div class="grid two">
     <section class="card"><div class="card-header"><strong>Connect to Cloud9-Speaches</strong></div>
       <div class="card-body stack">
-        <p class="help">Connect an existing local or private-LAN Cloud9-Speaches instance. Probe model and FastConformer availability before changing settings. Existing primary provider and API keys are preserved.</p>
+        <p class="help">Connect an existing local or private-LAN Cloud9-Speaches instance. Probe available models with native word timestamps before changing settings. Existing primary provider and API keys are preserved.</p>
         <div class="field"><label for="speaches-connect-base">Cloud9-Speaches server URL</label><input id="speaches-connect-base" class="input" bind:value={speachesAddress} placeholder="http://127.0.0.1:8005"/></div>
         <div class="row wrap"><button class="btn primary" disabled={!loaded||speachesBusy} on:click={connectSpeaches}>{speachesBusy ? 'Checking…' : 'Connect Cloud9-Speaches'}</button>
           {#if speachesPrevious}<button class="btn" disabled={speachesBusy} on:click={undoSpeaches}>Undo connection</button>{/if}</div>
-        <p class="help">Uses local fallback Turbo GGUF and strict measured-word alignment. For a Docker deployment on another machine, enter its reachable private-LAN HTTPS/HTTP address.</p>
+        <p class="help">Uses Whisper Turbo native word timing, without any separate aligner; missing timestamps are rejected. For a Docker deployment on another machine, enter its reachable private-LAN HTTPS/HTTP address.</p>
       </div>
     </section>
     <section class="card"><div class="card-header"><strong>{$dictionary.primaryProvider}</strong></div><div class="card-body stack">
@@ -88,13 +86,15 @@
       <button class="btn" disabled={!form.localTranscriptionUrl} on:click={()=>models('local')}>{$dictionary.testModels}</button>
     </div></section>
 
-    <section class="card"><div class="card-header"><strong>Acoustic word alignment · FR / EN / ZH</strong></div><div class="card-body stack">
-      <label class="check"><input type="checkbox" bind:checked={form.alignmentEnabled}/> Acoustic alignment for every ASR provider/model</label>
-      <label class="check"><input type="checkbox" bind:checked={form.alignmentRequired} disabled={!form.alignmentEnabled}/> Strict: stop if acoustic word alignment is unavailable or invalid; never silently substitute interpolated timestamps</label>
-      <div class="field"><label for="alignment-url">Word aligner endpoint</label><input id="alignment-url" class="input" bind:value={form.alignmentUrl} placeholder="http://aligner:8006/align"/></div>
-      <div class="field"><label for="alignment-model">Alignment model (optional)</label><input id="alignment-model" class="input" bind:value={form.alignmentModel} placeholder="Automatic for chosen language (recommended)"/><span class="help">Leave blank to select the alignment model for the audio language; set transcription language to fr, en, or zh.</span></div>
-      <div class="field"><label for="alignment-key">Aligner API key {form.alignmentApiKeySet?'· stored':''}</label><div class="row"><select id="alignment-key" class="select" style="max-width:150px" bind:value={alignAction}><option value="keep">Keep</option><option value="replace">Replace</option><option value="clear">Clear</option></select><input type="password" class="input" aria-label="Alignment API key" disabled={alignAction!=='replace'} bind:value={alignKey}/></div></div>
-      <span class="help">Word timestamps are measured against the actual audio. Low-confidence alignments still need review; their presence alone does not prove millisecond accuracy. Chinese is aligned at character/token level when its ASR returns unspaced text.</span>
+    <section class="card"><div class="card-header"><strong>Horodatage des mots · AutoSubs (FR / EN)</strong></div><div class="card-body stack">
+      <p class="help">Priorité systématique aux horodatages natifs du transcripteur (Whisper, Parakeet…). Cloud9-Speaches ne lance aucun aligneur pour AutoSubs.</p>
+      <label class="check"><input type="checkbox" bind:checked={form.alignmentEnabled} on:change={() => { if(form.alignmentEnabled && !form.alignmentModel) form.alignmentModel='auto'; }}/>Alignement facultatif si le modèle ASR ne fournit pas les horaires des mots (ex. Qwen3-ASR)</label>
+      {#if form.alignmentEnabled}
+      <div class="field"><label for="autosubs-aligner-local-model">Modèle GGUF local (monté dans AutoSubs)</label><input id="autosubs-aligner-local-model" class="input" bind:value={form.alignmentModel} placeholder="auto (FastConformer FR/EN, téléchargement à la demande)"/></div>
+      <p class="help">CrispASR est lancé uniquement pour cette tâche, sans service supplémentaire ; auto = FastConformer Q4 (~70 Mo) en FR/EN, téléchargé et conservé dans le cache d’AutoSubs au premier usage. Le modèle Qwen3-ForcedAligner (~529 Mo) reste accessible en saisissant qwen3-forced-aligner. Une erreur d'alignement bloque le rendu ; aucun mot du texte ASR ne peut être réécrit. Les durées nulles rapprochées sont regroupées sans inventer d'horaires. Le découpage des sous-titres suit les règles syntaxiques FR/EN, sans LLM.</p>
+      {:else}
+      <p class="help">Option désactivée : les moteurs sans horaires natifs par mot ne produisent pas de sous-titres automatiquement. Les transcriptions simples restent possibles via Speaches.</p>
+      {/if}
     </div></section>
 
     <section class="card"><div class="card-header"><strong>{$dictionary.llm}</strong></div><div class="card-body stack">

@@ -44,7 +44,7 @@ Le navigateur n'est pas le moteur métier. Rust possède la normalisation des ti
 - **Picker serveur + favoris** — les vidéos déjà montées dans le conteneur ne sont pas recopiées inutilement ; un dossier peut être ajouté aux favoris persistants pour le retrouver immédiatement.
 - **Sidecars** — import `.ass`, `.ssa`, `.srt` ou JSON AutoSubs; ajout, remplacement ou suppression avant rendu.
 - **Transcription** — endpoint externe compatible OpenAI + fournisseur local/fallback type Speaches.
-- **Forced alignment optionnel** — transcription et précision temporelle restent deux étapes séparées : AutoSubs peut valider les bornes mot-à-mot renvoyées par un aligner HTTP compatible WhisperX et revenir automatiquement aux timings natifs si l’alignement est indisponible ou invalide.
+- **Alignement local facultatif** — AutoSubs privilégie les horodatages natifs ; sinon il peut lancer ponctuellement CrispASR avec FastConformer FR/EN Q4, téléchargé une seule fois et mis en cache. Aucun serveur d’alignement ni endpoint forcé dans Speaches.
 - **Correction LLM optionnelle** — orthographe et ponctuation sans laisser le modèle modifier directement les timings.
 - **Un seul moteur de timing** — Rust répare plages invalides, chevauchements, gaps et timings de mots. Le frontend ne possède pas une deuxième implémentation divergente.
 - **Découpage Unicode/français** — comptage par graphèmes, opportunités Unicode et règles de non-coupure françaises.
@@ -181,7 +181,7 @@ Si préparation ou rendu échoue, la source ne bouge pas.
 
 Si le workflow comporte `"reviewBeforeRender": true`, AutoSubs s'arrête **après la transcription et l'alignement** avec un Job en état **Prêt**. Aucun sous-titre n'est incrusté, aucun MP4 n'est exposé au dossier de publication avant validation. L'édition par `PUT /api/v1/jobs/{id}/subtitles`, puis `POST /api/v1/jobs/{id}/render`, utilisent les fonctions natives ; le rendu validé archive ensuite la source normalement. Ce contrôle est optionnel, désactivé par défaut pour préserver les workflows existants.
 
-Sur les audios de plus de 45 secondes avec alignement strict, la transcription est segmentée en plages WAV de 24 secondes puis réassemblée avec leurs **bornes absolues** avant alignement acoustique. Les temps des mots ne sont jamais inventés.
+La transcription conserve le contexte audio intégral, sans anciens tronçons WAV de 24 secondes. AutoSubs ne lance son aligneur ponctuel que si les horaires natifs sont absents ou invalides et si l’option a été activée.
 
 
 ## FFmpeg et accélération matérielle
@@ -194,9 +194,11 @@ Le mode `auto` classe les encodeurs H.264 matériels validés par le benchmark r
 
 ### Alignement mot-à-mot précis (optionnel)
 
-Les timestamps natifs Whisper/faster-whisper restent entièrement pris en charge. Pour le mot-à-mot le plus précis, active l’étape d’alignement dans **Settings** et renseigne un endpoint HTTP compatible. AutoSubs envoie le transcript accepté avec l’audio mono original, vérifie identité lexicale, nombre de mots et monotonie des bornes, puis conserve automatiquement les timings natifs si la réponse n’est pas valide.
+Les horaires natifs valides (Whisper/faster-whisper, Parakeet…) sont toujours prioritaires. L’alignement AutoSubs est une option pour les moteurs sans horaires de mots (Qwen3-ASR notamment). Avec le réglage auto, un processus CrispASR local télécharge puis réutilise FastConformer FR/EN Q4 (~70 Mo pour le français). Pas de daemon, d’alignement forcé Speaches ou de conteneur supplémentaire.
 
-Un provider WhisperX CPU-only testé est fourni dans [`deploy/whisperx-aligner/`](deploy/whisperx-aligner/). Il reste optionnel et indépendant de la transcription : Speaches ou un autre ASR compatible OpenAI peut continuer à transcrire, WhisperX ne faisant que le forced alignment.
+Le transcript ASR est conservé à l’identique, avec validation des mots et des frontières temporelles. Les clitiques de durée nulle sont associés à un mot acoustiquement adjacent sans inventer leur propre durée ; les césures suivent des règles Unicode/syntaxiques FR/EN déterministes, sans LLM.
+
+L’image Docker Linux x86_64 inclut le binaire CrispASR épinglé. Pour les applications natives Windows/macOS/Linux, CrispASR doit encore être intégré aux installateurs et validé par CI ; en attendant, un exécutable CrispASR dans PATH ou la variable AUTOSUBS_ALIGNMENT_EXECUTABLE est nécessaire pour les modèles sans horodatages natifs. Les moteurs horodatés n’en ont pas besoin.
 
 ## ⚙️ Configuration
 

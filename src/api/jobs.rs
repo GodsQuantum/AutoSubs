@@ -374,7 +374,11 @@ pub async fn export_subtitles(
     let (mime, data) = match format.as_str() {
         "srt" => (
             "application/x-subrip",
-            crate::subtitle::srt::generate_srt_content(&lines).into_bytes(),
+            crate::subtitle::srt::generate_display_srt_content(
+                &lines,
+                job.effective_preset.as_ref().is_some_and(|p| p.uppercase),
+            )
+            .into_bytes(),
         ),
         "json" => ("application/json", serde_json::to_vec_pretty(&lines)?),
         "ass" => {
