@@ -97,6 +97,14 @@ fn pair_is_unbreakable(left: &str, right: &str) -> bool {
         || left.ends_with(['\'', '’'])
         || right.starts_with(['\'', '’'])
         || hyphen_continuation(left, right)
+        || matches!(
+            (cleaned_word(left).as_str(), cleaned_word(right).as_str()),
+            ("avant", "de")
+                | ("parce", "que")
+                | ("tandis", "que")
+                | ("afin", "de")
+                | ("jusqu", "à")
+        )
 }
 
 fn pair_is_bound(left: &str, right: &str) -> bool {
@@ -104,6 +112,11 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
     let right_trimmed = right.trim_start();
     if pair_is_unbreakable(left_trimmed, right_trimmed) {
         return true;
+    }
+    // Punctuation must win over subject/verb glue: no two sentences in
+    // the same display event simply because the first ended in "est.".
+    if ends_sentence(left_trimmed) && !abbreviation_re().is_match(left_trimmed) {
+        return false;
     }
     let l = cleaned_word(left);
     let r = cleaned_word(right);
@@ -128,8 +141,21 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
         "êtes", "sont", "étais", "était", "étions", "étiez", "étaient", "été", "être", "sera",
         "seras", "serons", "serez", "seront",
     ];
-    const BACKWARD: &[&str] = &["pas", "plus", "jamais", "rien", "personne"];
-    if FORWARD.contains(&l.as_str()) || BACKWARD.contains(&r.as_str()) {
+    const BACKWARD: &[&str] = &[
+        "pas", "plus", "jamais", "rien", "personne", "de", "du", "des", "à", "au", "aux", "of",
+        "to",
+    ];
+    const EN_FORWARD: &[&str] = &[
+        "the", "a", "an", "this", "that", "these", "those", "my", "your", "his", "her", "its",
+        "our", "their", "each", "every", "i", "you", "he", "she", "it", "we", "they", "am", "is",
+        "are", "was", "were", "be", "been", "have", "has", "had", "will", "would", "can", "could",
+        "should", "must", "do", "does", "did", "to", "of", "for", "with", "from", "at", "in", "on",
+        "by", "into", "not", "never", "very", "too", "much",
+    ];
+    if FORWARD.contains(&l.as_str())
+        || BACKWARD.contains(&r.as_str())
+        || EN_FORWARD.contains(&l.as_str())
+    {
         return true;
     }
 
@@ -186,6 +212,36 @@ fn boundary_penalty(left: &str, right: &str) -> f64 {
     }
     if left.trim_end().ends_with([',', ';', ':']) {
         return -45.0;
+    }
+    // When layout constraints permit, break before a new clause rather
+    // than between its subject and predicate (FR and EN).
+    if matches!(
+        cleaned_word(right).as_str(),
+        "mais"
+            | "et"
+            | "ou"
+            | "donc"
+            | "avec"
+            | "dans"
+            | "sans"
+            | "pour"
+            | "sur"
+            | "parce"
+            | "quand"
+            | "lorsque"
+            | "but"
+            | "and"
+            | "or"
+            | "because"
+            | "while"
+            | "before"
+            | "after"
+            | "with"
+            | "without"
+            | "into"
+            | "from"
+    ) {
+        return -70.0;
     }
     0.0
 }
@@ -465,6 +521,36 @@ fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Ve
             best = Some((cost, split));
         }
     }
+    // If no strictly bound-preserving two-line layout exists, prefer a
+    // balanced soft-boundary split (e.g. "je suis / pour la peine de mort")
+    // rather than creating an 80 ms standalone cue and orphaning "de mort".
+    // Punctuation attachments and elisions remain unbreakable.
+    if best.is_none() && max_lines >= 2 {
+        for split in 1..words.len() {
+            let top = &words[..split];
+            let bottom = &words[split..];
+            let top_len = segment_text_len(top);
+            let bottom_len = segment_text_len(bottom);
+            if top_len > max_chars
+                || bottom_len > max_chars
+                || top_len > bottom_len
+                || pair_is_unbreakable(&words[split - 1].word, &words[split].word)
+            {
+                continue;
+            }
+            let cost = line_cost(top, max_chars, false)
+                + line_cost(bottom, max_chars, true)
+                + boundary_penalty(&words[split - 1].word, &words[split].word)
+                + if pair_is_bound(&words[split - 1].word, &words[split].word) {
+                    500.0
+                } else {
+                    0.0
+                };
+            if best.is_none_or(|(best_cost, _)| cost < best_cost) {
+                best = Some((cost, split));
+            }
+        }
+    }
     best.map(|(_, split)| vec![split, words.len()])
         .unwrap_or_else(|| vec![words.len()])
 }
@@ -539,6 +625,85 @@ fn best_event_boundary(
         })
 }
 
+fn likely_new_sentence(word: &str) -> bool {
+    let text = word.trim_start_matches(['"', '«', '“', '(', '-', ' ']);
+    text.chars().next().is_some_and(char::is_uppercase)
+        && matches!(
+            cleaned_word(text).as_str(),
+            "je" | "tu"
+                | "il"
+                | "elle"
+                | "on"
+                | "nous"
+                | "vous"
+                | "ils"
+                | "elles"
+                | "ce"
+                | "cette"
+                | "mais"
+                | "donc"
+                | "i"
+                | "we"
+                | "they"
+                | "he"
+                | "she"
+                | "it"
+                | "you"
+                | "the"
+                | "but"
+                | "and"
+                | "so"
+        )
+}
+
+// ASR segment punctuation can be sparse, but a capitalized discourse marker
+// often starts a new clause even with no silence between native word timings.
+// Apply this only at obvious FR/EN discourse boundaries; do not split on
+// proper-name capitalization (Teddy Riner) or ordinary mid-clause conjunctions.
+fn strong_clause_restart(word: &str) -> bool {
+    let text = word.trim_start_matches(['"', '«', '“', '(', '-', ' ']);
+    if !text.chars().next().is_some_and(char::is_uppercase) {
+        return false;
+    }
+    matches!(
+        cleaned_word(text).as_str(),
+        "donc"
+            | "mais"
+            | "alors"
+            | "cependant"
+            | "toutefois"
+            | "ensuite"
+            | "sinon"
+            | "however"
+            | "but"
+            | "therefore"
+            | "meanwhile"
+            | "instead"
+            | "nevertheless"
+            | "et"
+            | "je"
+            | "tu"
+            | "il"
+            | "elle"
+            | "on"
+            | "nous"
+            | "vous"
+            | "ils"
+            | "elles"
+            | "and"
+            | "i"
+            | "you"
+            | "he"
+            | "she"
+            | "it"
+            | "we"
+            | "they"
+            | "first"
+            | "secondly"
+            | "finally"
+    )
+}
+
 fn make_block(words: &[SubtitleWord], id: u32, max_chars: usize, max_lines: usize) -> SubtitleLine {
     let breaks = best_layout(words, max_chars, max_lines);
     let mut text_lines = Vec::new();
@@ -560,6 +725,137 @@ fn make_block(words: &[SubtitleWord], id: u32, max_chars: usize, max_lines: usiz
         text: text_lines.join("\n"),
         words: Some(words.to_vec()),
     }
+}
+
+/// Short utterances are not automatically standalone subtitles. Merge a
+/// sub-550 ms fragment into the following/preceding syntactic unit when the
+/// original word timestamps and 2-line layout allow it. Never interpolate
+/// individual word timestamps or change the recognized text.
+fn rebalance_short_cues(
+    mut lines: Vec<SubtitleLine>,
+    max_chars: usize,
+    max_lines: usize,
+) -> Vec<SubtitleLine> {
+    const MIN_CUE_SECS: f64 = 0.55;
+    let mut i = 0_usize;
+    while i < lines.len() {
+        if lines[i].end - lines[i].start >= MIN_CUE_SECS {
+            i += 1;
+            continue;
+        }
+        let mut merged = false;
+        if i + 1 < lines.len() {
+            let cur = lines[i].words.as_deref().unwrap_or(&[]);
+            let next = lines[i + 1].words.as_deref().unwrap_or(&[]);
+            let gap = lines[i + 1].start - lines[i].end;
+            let boundary = cur.last().zip(next.first()).is_some_and(|(l, r)| {
+                !ends_sentence(&l.word)
+                    && !strong_clause_restart(&r.word)
+                    && !pair_is_bound(&l.word, &r.word)
+            });
+            if boundary && gap <= 0.20 && !cur.is_empty() && !next.is_empty() {
+                let mut joined = cur.to_vec();
+                joined.extend_from_slice(next);
+                if can_layout(&joined, max_chars, max_lines) {
+                    lines[i] = make_block(&joined, lines[i].id, max_chars, max_lines);
+                    lines.remove(i + 1);
+                    merged = true;
+                }
+            }
+        }
+        // When both events already occupy the permitted two lines, do not
+        // leave a 300 ms fragment orphaned. Move complete acoustic words from
+        // the following event, then reflow both within the same native layout
+        // constraints. This uses no inferred per-word timestamps and does
+        // not change the transcript, word order, or rendering profile.
+        if !merged && i + 1 < lines.len() {
+            let left = lines[i].words.as_deref().unwrap_or(&[]);
+            let right = lines[i + 1].words.as_deref().unwrap_or(&[]);
+            let gap = lines[i + 1].start - lines[i].end;
+            if gap <= 0.20
+                && !left.is_empty()
+                && right.len() >= 2
+                && !ends_sentence(&left.last().unwrap().word)
+                && !strong_clause_restart(&right[0].word)
+            {
+                let mut combined = left.to_vec();
+                combined.extend_from_slice(right);
+                let mut best: Option<(f64, usize)> = None;
+                for take in 1..right.len() {
+                    let k = left.len() + take;
+                    if pair_is_bound(&combined[k - 1].word, &combined[k].word)
+                        || !unicode_allows_boundary(&combined[k - 1].word, &combined[k].word)
+                    {
+                        continue;
+                    }
+                    let first = &combined[..k];
+                    let second = &combined[k..];
+                    let first_span = first.last().unwrap().end - first.first().unwrap().start;
+                    let second_span = second.last().unwrap().end - second.first().unwrap().start;
+                    if first_span < MIN_CUE_SECS
+                        || second_span < MIN_CUE_SECS
+                        || !can_layout(first, max_chars, max_lines)
+                        || !can_layout(second, max_chars, max_lines)
+                    {
+                        continue;
+                    }
+                    // Minimize edit distance to the existing segmentation:
+                    // moving one complete word is preferable to swallowing a
+                    // full clause merely to target an arbitrary screen time.
+                    let score = take as f64 * 3.0
+                        + (first_span - 1.1).abs() * 0.2
+                        + (second_span - 1.8).abs() * 0.1
+                        + boundary_penalty(&combined[k - 1].word, &combined[k].word) * 0.01;
+                    if best.is_none_or(|(cost, _)| score < cost) {
+                        best = Some((score, k));
+                    }
+                }
+                if let Some((_, k)) = best {
+                    lines[i] = make_block(&combined[..k], lines[i].id, max_chars, max_lines);
+                    lines[i + 1] =
+                        make_block(&combined[k..], lines[i + 1].id, max_chars, max_lines);
+                    merged = true;
+                }
+            }
+        }
+        if !merged && i > 0 {
+            let prev = lines[i - 1].words.as_deref().unwrap_or(&[]);
+            let cur = lines[i].words.as_deref().unwrap_or(&[]);
+            let gap = lines[i].start - lines[i - 1].end;
+            let boundary = prev.last().zip(cur.first()).is_some_and(|(l, r)| {
+                !ends_sentence(&l.word)
+                    && !strong_clause_restart(&r.word)
+                    && !pair_is_bound(&l.word, &r.word)
+            });
+            if boundary && gap <= 0.20 && !prev.is_empty() && !cur.is_empty() {
+                let mut joined = prev.to_vec();
+                joined.extend_from_slice(cur);
+                if can_layout(&joined, max_chars, max_lines) {
+                    lines[i - 1] = make_block(&joined, lines[i - 1].id, max_chars, max_lines);
+                    lines.remove(i);
+                    i = i.saturating_sub(1);
+                    merged = true;
+                }
+            }
+        }
+        if !merged {
+            // A genuinely isolated one-word utterance can remain on screen
+            // briefly after its spoken end, but never into the next cue.
+            let next = lines
+                .get(i + 1)
+                .map(|line| line.start)
+                .unwrap_or(f64::INFINITY);
+            let extended = (lines[i].start + MIN_CUE_SECS).min(next - 0.04);
+            if extended > lines[i].end {
+                lines[i].end = extended;
+            }
+            i += 1;
+        }
+    }
+    for (id, line) in lines.iter_mut().enumerate() {
+        line.id = id as u32;
+    }
+    lines
 }
 
 pub fn group_transcription_into_lines(
@@ -597,8 +893,12 @@ pub fn group_transcription_into_lines_with_layout(
             let gap = (word.start - previous.end).max(0.0);
             let sentence_end =
                 ends_sentence(&previous.word) && !abbreviation_re().is_match(previous.word.trim());
+            let probable_sentence =
+                (current.len() >= 3 && gap >= 0.12 && likely_new_sentence(&word.word))
+                    || (current.len() >= 2 && strong_clause_restart(&word.word));
             if !pair_is_bound(&previous.word, &word.word)
                 && (sentence_end
+                    || probable_sentence
                     || gap >= 0.35
                     || (gap >= 0.20 && segment_text_len(&current) >= max_chars / 2))
             {
@@ -624,7 +924,7 @@ pub fn group_transcription_into_lines_with_layout(
     if !current.is_empty() {
         blocks.push(make_block(&current, id, max_chars, max_lines));
     }
-    blocks
+    rebalance_short_cues(blocks, max_chars, max_lines)
 }
 
 pub fn transcript_timeline(transcription: &TranscriptionResponse) -> TranscriptTimeline {
@@ -671,6 +971,168 @@ mod tests {
         let timeline = transcript_timeline(&text);
         assert_eq!(timeline.words.len(), 4);
         assert_eq!(timeline.timing_quality, TimingQuality::Inferred);
+    }
+
+    #[test]
+    fn full_stop_overrides_grammar_bindings_in_french_and_english() {
+        for (a, b) in [("est.", "Je"), ("will.", "We"), ("a.", "The")] {
+            assert!(!pair_is_bound(a, b), "{a} + {b}");
+        }
+        let src = transcription(&[
+            ("Il", 0.0, 0.1),
+            ("est.", 0.1, 0.25),
+            ("Je", 0.26, 0.35),
+            ("pars.", 0.36, 0.54),
+        ]);
+        let blocks = group_transcription_into_lines(&src, 42, 2);
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+    }
+
+    #[test]
+    fn english_function_words_cannot_be_orphaned() {
+        for (a, b) in [
+            ("the", "house"),
+            ("an", "idea"),
+            ("she", "is"),
+            ("will", "run"),
+            ("not", "leave"),
+            ("to", "school"),
+            ("our", "family"),
+        ] {
+            assert!(pair_is_bound(a, b), "{a} / {b}");
+        }
+    }
+
+    #[test]
+    fn merge_short_french_lead_in_without_changing_acoustic_word_times() {
+        let src = transcription(&[
+            ("Moi,", 0.0, 0.08),
+            ("je", 0.09, 0.23),
+            ("suis", 0.23, 0.39),
+            ("pour", 0.39, 0.52),
+            ("la", 0.52, 0.60),
+            ("peine", 0.60, 0.83),
+            ("de", 0.83, 0.94),
+            ("mort.", 0.94, 1.16),
+        ]);
+        let lines = group_transcription_into_lines(&src, 28, 2);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].text.starts_with("Moi, je suis"));
+        assert_eq!(lines[0].start, 0.0);
+        assert_eq!(lines[0].end, 1.16);
+        assert_eq!(lines[0].words.as_ref().unwrap().len(), 8);
+        assert_eq!(lines[0].words.as_ref().unwrap()[0].end, 0.08);
+    }
+
+    #[test]
+    fn reflow_short_fragment_into_following_syntactic_unit_without_changing_word_times() {
+        let input = transcription(&[
+            ("Une", 0.0, 0.12),
+            ("petite", 0.12, 0.35),
+            ("claque", 0.39, 0.68),
+            ("comme", 0.68, 0.87),
+            ("ça", 0.87, 1.05),
+            ("c'est", 1.05, 1.27),
+            ("vraiment", 1.27, 1.60),
+            ("dès", 1.60, 1.82),
+            ("qu'il", 1.82, 2.10),
+        ]);
+        let original = raw_words(&input);
+        let first = make_block(&original[..2], 0, 26, 2);
+        let second = make_block(&original[2..], 1, 26, 2);
+        assert!(first.end - first.start < 0.55);
+        let output = rebalance_short_cues(vec![first, second], 26, 2);
+        assert_eq!(output.len(), 2, "{output:?}");
+        assert!(output[0].end - output[0].start >= 0.55);
+        assert!(output[1].end - output[1].start >= 0.55);
+        assert!(output[0].text.to_lowercase().contains("claque"));
+        assert!(output[1].text.to_lowercase().starts_with("comme"));
+        let flattened: Vec<_> = output.into_iter().flat_map(|x| x.words.unwrap()).collect();
+        assert_eq!(
+            flattened, original,
+            "word text/times must be byte-for-byte stable"
+        );
+    }
+
+    #[test]
+    fn isolated_short_cue_extends_only_into_silence_and_no_speech() {
+        let src = transcription(&[
+            ("Oui.", 0.0, 0.17),
+            ("Cependant", 1.00, 1.32),
+            ("ce", 1.32, 1.41),
+            ("serait", 1.41, 1.61),
+            ("étrange.", 1.61, 1.95),
+        ]);
+        let lines = group_transcription_into_lines(&src, 28, 2);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines[0].end, 0.55);
+        assert!(lines[1].start >= 1.0);
+        assert_eq!(lines[0].words.as_ref().unwrap()[0].end, 0.17);
+    }
+
+    #[test]
+    fn capitalized_discourse_marker_restarts_event_without_silence_fr_en() {
+        let fr = transcription(&[
+            ("l'extrême", 0.0, 0.2),
+            ("droite", 0.2, 0.4),
+            ("Donc", 0.41, 0.54),
+            ("on", 0.54, 0.63),
+            ("repart", 0.63, 0.85),
+        ]);
+        let blocks = group_transcription_into_lines(&fr, 42, 2);
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+        assert_eq!(blocks[0].text, "l'extrême droite");
+        assert!(blocks[1].text.starts_with("Donc on"));
+
+        let en = transcription(&[
+            ("That", 0.0, 0.2),
+            ("seems", 0.2, 0.38),
+            ("fine", 0.38, 0.5),
+            ("However", 0.51, 0.69),
+            ("the", 0.69, 0.8),
+            ("outcome", 0.8, 1.0),
+        ]);
+        let blocks = group_transcription_into_lines(&en, 42, 2);
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+        assert_eq!(blocks[0].text, "That seems fine");
+        assert!(blocks[1].text.starts_with("However"));
+        assert!(!strong_clause_restart("donc")); // Lowercase conjunction in a clause.
+        assert!(!strong_clause_restart("Riner")); // Proper nouns remain intact.
+    }
+
+    #[test]
+    fn probable_new_french_sentence_starts_new_event() {
+        let src = transcription(&[
+            ("C'est", 0.0, 0.15),
+            ("vraiment", 0.15, 0.36),
+            ("incroyable", 0.36, 0.64),
+            ("aujourd'hui", 0.64, 0.85),
+            ("Je", 0.99, 1.11),
+            ("pars", 1.11, 1.28),
+            ("demain.", 1.28, 1.52),
+        ]);
+        let blocks = group_transcription_into_lines(&src, 42, 2);
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+        assert!(blocks[1].text.starts_with("Je pars"));
+    }
+
+    #[test]
+    fn english_article_and_subject_stay_with_their_following_words() {
+        let src = transcription(&[
+            ("You", 0.0, 0.15),
+            ("should", 0.15, 0.3),
+            ("visit", 0.3, 0.48),
+            ("the", 0.48, 0.6),
+            ("old", 0.6, 0.72),
+            ("museum", 0.72, 0.9),
+            ("before", 0.9, 1.04),
+            ("noon.", 1.04, 1.2),
+        ]);
+        let blocks = group_transcription_into_lines(&src, 15, 2);
+        for block in blocks {
+            assert!(!block.text.contains("the\\nold"), "{}", block.text);
+            assert!(!block.text.contains("You\\nshould"), "{}", block.text);
+        }
     }
 
     #[test]
@@ -941,7 +1403,10 @@ mod tests {
             assert!(!line.text.contains("parce\nque"));
             let words = line.words.as_ref().unwrap();
             assert_eq!(line.start, words.first().unwrap().start);
-            assert_eq!(line.end, words.last().unwrap().end);
+            // The display may linger into a natural silence to make an
+            // otherwise unreadably short interjection visible, while the
+            // original per-word timestamps remain untouched.
+            assert!(line.end >= words.last().unwrap().end);
         }
         let emitted: Vec<_> = lines
             .into_iter()
