@@ -25,7 +25,7 @@ fn effective_max_chars(options: LayoutOptions) -> usize {
     } else {
         f64::INFINITY
     };
-    (options.max_chars.clamp(4, 42) as f64)
+    (options.max_chars.clamp(1, 256) as f64)
         .min(metric_limit.floor())
         .max(1.0) as usize
 }
@@ -124,8 +124,23 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
         return false;
     }
 
-    if protected_token_re().is_match(left.trim()) || protected_token_re().is_match(right.trim()) {
-        return left.contains("http") || right.contains("http");
+    // Tokens containing an elision, a URL or a mention are already indivisible
+    // by the tokenizer; their neighbours still require French syntactic glue.
+    if left.contains("http") || right.contains("http") {
+        return true;
+    }
+    // Cardinal numbers bind to the noun they quantify ("7 saisons", "3 ans").
+    if l.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    // Keep multiword proper names in the same grammatical unit. Do not treat
+    // sentence starts, discourse markers or punctuation as proper names.
+    if left.chars().next().is_some_and(char::is_uppercase)
+        && right.chars().next().is_some_and(char::is_uppercase)
+        && !matches!(r.as_str(), "mais" | "donc" | "alors" | "cependant")
+        && !matches!(l.as_str(), "je" | "tu" | "il" | "elle" | "on" | "nous" | "vous")
+    {
+        return true;
     }
 
     const FORWARD: &[&str] = &[
@@ -136,7 +151,7 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
         "ses", "notre", "votre", "nos", "vos", "leurs", "ne", "n", "très", "trop", "plus", "moins",
         "bien", "si", "qui", "que", "qu", "quoi", "dont", "où", "quand", "comment", "pourquoi",
         "et", "ou", "mais", "donc", "or", "ni", "car", "parce", "tandis", "jusqu", "jusque",
-        "afin", "tel", "telle", "tels", "telles", "quel", "quelle", "quels", "quelles", "avant",
+        "afin", "tel", "telle", "tels", "telles", "quel", "quelle", "quels", "quelles",  "c'est", "c’est", "j'ai", "j’ai", "qu'il", "qu’elle", "qu'elle", "qu’il",
         "alors", "ainsi", "a", "ai", "as", "avons", "avez", "ont", "suis", "es", "est", "sommes",
         "êtes", "sont", "étais", "était", "étions", "étiez", "étaient", "été", "être", "sera",
         "seras", "serons", "serez", "seront",
@@ -174,6 +189,29 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
             | ("y", "a")
             | ("il", "y")
     )
+}
+
+// Strong attachment is more important than broad clause glue. With a narrow
+// configured width, "que les enfants" must become "que" / "les enfants",
+// never "que les" / "enfants". Other syntactic preferences remain soft.
+fn pair_is_priority_glue(left: &str, right: &str) -> bool {
+    if pair_is_unbreakable(left, right) {
+        return true;
+    }
+    let l = cleaned_word(left);
+    let r = cleaned_word(right);
+    const DETERMINERS: &[&str] = &[
+        "le", "la", "les", "un", "une", "des", "du", "au", "aux", "ce",
+        "cet", "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes",
+        "son", "sa", "ses", "notre", "votre", "nos", "vos", "leurs",
+        "quel", "quelle", "quels", "quelles",
+    ];
+    DETERMINERS.contains(&l.as_str())
+        || l.chars().all(|c| c.is_ascii_digit())
+        || (left.chars().next().is_some_and(char::is_uppercase)
+            && right.chars().next().is_some_and(char::is_uppercase)
+            && !matches!(l.as_str(), "je" | "tu" | "il" | "elle" | "on" | "nous" | "vous")
+            && !matches!(r.as_str(), "mais" | "donc" | "alors"))
 }
 
 fn unicode_allows_boundary(left: &str, right: &str) -> bool {
@@ -501,57 +539,103 @@ fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Ve
         return vec![words.len()];
     }
 
-    let mut best: Option<(f64, usize)> = None;
-    for split in 1..words.len() {
-        let top = &words[..split];
-        let bottom = &words[split..];
-        let top_len = segment_text_len(top);
-        let bottom_len = segment_text_len(bottom);
-        if top_len > max_chars
-            || bottom_len > max_chars
-            || top_len > bottom_len
-            || pair_is_bound(&words[split - 1].word, &words[split].word)
-        {
-            continue;
-        }
-        let cost = line_cost(top, max_chars, false)
-            + line_cost(bottom, max_chars, true)
-            + boundary_penalty(&words[split - 1].word, &words[split].word);
-        if best.is_none_or(|(best_cost, _)| cost < best_cost) {
-            best = Some((cost, split));
-        }
-    }
-    // If no strictly bound-preserving two-line layout exists, prefer a
-    // balanced soft-boundary split (e.g. "je suis / pour la peine de mort")
-    // rather than creating an 80 ms standalone cue and orphaning "de mort".
-    // Punctuation attachments and elisions remain unbreakable.
-    if best.is_none() && max_lines >= 2 {
-        for split in 1..words.len() {
-            let top = &words[..split];
-            let bottom = &words[split..];
-            let top_len = segment_text_len(top);
-            let bottom_len = segment_text_len(bottom);
-            if top_len > max_chars
-                || bottom_len > max_chars
-                || top_len > bottom_len
-                || pair_is_unbreakable(&words[split - 1].word, &words[split].word)
-            {
-                continue;
+    // A global dynamic-programming layout chooses every break together,
+    // rather than optimizing only the first of exactly two lines. Syntax is a
+    // hard constraint in the first pass, then a costly relaxation *only* if
+    // the requested dimensions make any syntax-preserving layout impossible.
+    // Word-level acoustic timestamps are never interpolated or modified.
+    fn calculate(
+        words: &[SubtitleWord],
+        max_chars: usize,
+        max_lines: usize,
+        grammar_relaxation: u8,
+    ) -> Option<Vec<usize>> {
+        let n = words.len();
+        let limit = max_lines.clamp(1, 8).min(n);
+        let mut dp = vec![vec![f64::INFINITY; n + 1]; limit + 1];
+        let mut previous = vec![vec![usize::MAX; n + 1]; limit + 1];
+        dp[0][0] = 0.0;
+
+        for row in 1..=limit {
+            for end in row..=n {
+                for begin in row - 1..end {
+                    if !dp[row - 1][begin].is_finite() {
+                        continue;
+                    }
+                    let part = &words[begin..end];
+                    let len = segment_text_len(part);
+                    // An individual word is a typographic atom: it can
+                    // exceed the configured limit, but must never be split
+                    // into invalid graphemes to force a number.
+                    if len > max_chars && part.len() > 1 {
+                        continue;
+                    }
+                    if begin > 0 {
+                        let a = &words[begin - 1].word;
+                        let b = &words[begin].word;
+                        if pair_is_unbreakable(a, b) || !unicode_allows_boundary(a, b) {
+                            continue;
+                        }
+                        if grammar_relaxation == 0 && pair_is_bound(a, b) {
+                            continue;
+                        }
+                        if grammar_relaxation == 1 && pair_is_priority_glue(a, b) {
+                            continue;
+                        }
+                    }
+                    let is_final = end == n;
+                    let mut score = dp[row - 1][begin]
+                        + line_cost(part, max_chars, is_final)
+                        + if row > 1 { 34.0 } else { 0.0 };
+                    if begin > 0 {
+                        score += boundary_penalty(
+                            &words[begin - 1].word, &words[begin].word,
+                        );
+                        // Existing subtitle conventions prefer a visually
+                        // heavier final line, but never above grammatical
+                        // attachment or speech timing.
+                        if begin > 1 && end == n {
+                            let prev_start = previous[row - 1][begin];
+                            if prev_start != usize::MAX {
+                                let prev_len = segment_text_len(&words[prev_start..begin]);
+                                if prev_len > len {
+                                    score += (prev_len - len) as f64 * 0.45;
+                                }
+                            }
+                        }
+                    }
+                    if score < dp[row][end] {
+                        dp[row][end] = score;
+                        previous[row][end] = begin;
+                    }
+                }
             }
-            let cost = line_cost(top, max_chars, false)
-                + line_cost(bottom, max_chars, true)
-                + boundary_penalty(&words[split - 1].word, &words[split].word)
-                + if pair_is_bound(&words[split - 1].word, &words[split].word) {
-                    500.0
-                } else {
-                    0.0
-                };
-            if best.is_none_or(|(best_cost, _)| cost < best_cost) {
-                best = Some((cost, split));
-            }
         }
+
+        let lines = (1..=limit).filter(|&row| dp[row][n].is_finite())
+            .min_by(|&a, &b| dp[a][n].total_cmp(&dp[b][n]))?;
+        let mut boundaries = Vec::with_capacity(lines);
+        let mut row = lines;
+        let mut end = n;
+        while row > 0 {
+            boundaries.push(end);
+            let before = previous[row][end];
+            if before == usize::MAX {
+                return None;
+            }
+            end = before;
+            row -= 1;
+        }
+        if end != 0 {
+            return None;
+        }
+        boundaries.reverse();
+        Some(boundaries)
     }
-    best.map(|(_, split)| vec![split, words.len()])
+
+    calculate(words, max_chars, max_lines, 0)
+        .or_else(|| calculate(words, max_chars, max_lines, 1))
+        .or_else(|| calculate(words, max_chars, max_lines, 2))
         .unwrap_or_else(|| vec![words.len()])
 }
 
@@ -756,7 +840,9 @@ fn rebalance_short_cues(
             if boundary && gap <= 0.20 && !cur.is_empty() && !next.is_empty() {
                 let mut joined = cur.to_vec();
                 joined.extend_from_slice(next);
-                if can_layout(&joined, max_chars, max_lines) {
+                if can_layout(&joined, max_chars, max_lines)
+                    && joined.last().unwrap().end - joined.first().unwrap().start <= 1.95
+                {
                     lines[i] = make_block(&joined, lines[i].id, max_chars, max_lines);
                     lines.remove(i + 1);
                     merged = true;
@@ -883,7 +969,7 @@ pub fn group_transcription_into_lines_with_layout(
         return Vec::new();
     }
     let max_chars = effective_max_chars(options);
-    let max_lines = options.max_lines.clamp(1, 2) as usize;
+    let max_lines = options.max_lines.clamp(1, 8) as usize;
     let mut blocks = Vec::new();
     let mut current: Vec<SubtitleWord> = Vec::new();
     let mut id = 0u32;
@@ -1142,17 +1228,19 @@ mod tests {
     }
 
     #[test]
-    fn french_delivery_caps_layout_at_two_lines_and_42_characters() {
+    fn french_layout_uses_configured_limits_instead_of_hidden_caps() {
         let options = LayoutOptions {
             max_chars: 80,
             max_lines: 4,
             output_width: 3840,
             font_size: 20.0,
         };
-        assert_eq!(effective_max_chars(options), 42);
-        let input = transcription(&[("mot", 0.0, 0.2); 40]);
+        assert_eq!(effective_max_chars(options), 80);
+        let input = transcription(&[("mot", 0.0, 0.2); 70]);
         let lines = group_transcription_into_lines_with_layout(&input, options);
-        assert!(lines.iter().all(|line| line.text.lines().count() <= 2));
+        assert!(lines.iter().all(|line| line.text.lines().count() <= 4));
+        assert!(lines.iter().any(|line| line.text.lines().count() >= 3));
+        assert!(lines.iter().all(|line| line.text.lines().all(|l| grapheme_len(l) <= 80)));
     }
 
     #[test]
@@ -1503,5 +1591,77 @@ mod tests {
         assert!(pair_is_bound("est", "parti"));
         assert!(pair_is_bound("a", "compris"));
         assert!(pair_is_bound("ont", "vu"));
+    }
+
+    #[test]
+    fn french_grammar_precedes_visual_balance_with_config_matrix() {
+        let corpus = [
+            "Le procureur explique avec beaucoup de détails la chronologie des faits et des témoignages.",
+            "Il va poursuivre la procédure devant le tribunal, mais il ne connaît pas encore l'avocat.",
+            "J'ai regardé 7 saisons de CSI Las Vegas et le mec connaît Hondelatte personnellement.",
+            "Elle a dit que la police était arrivée parce que les enfants étaient restés à la maison.",
+            "Dustin Kjersem était au Montana avec son chien, et Daren Christopher Abbey était là.",
+        ];
+        for max_chars in [12_u32, 20, 28, 36, 48, 64] {
+            for max_lines in [1_u32, 2, 3, 4] {
+                for line in corpus {
+                    let tokens: Vec<_> = line.split_whitespace().collect();
+                    let raw: Vec<_> = tokens.iter().enumerate().map(|(i, word)| {
+                        (*word, i as f64 * 0.16, (i + 1) as f64 * 0.16)
+                    }).collect();
+                    let src = transcription(&raw);
+                    let blocks = group_transcription_into_lines(&src, max_chars, max_lines);
+                    let flattened: Vec<_> = blocks.iter()
+                        .flat_map(|x| x.words.as_deref().unwrap_or(&[]).iter())
+                        .map(|w| w.word.clone()).collect();
+                    assert_eq!(flattened, tokens, "word loss at {max_chars}/{max_lines}");
+                    for block in blocks {
+                        assert!(block.text.lines().count() <= max_lines as usize);
+                        for visual in block.text.lines() {
+                            assert!(
+                                grapheme_len(visual) <= max_chars as usize ||
+                                (visual.split_whitespace().count() == 1 && grapheme_len(visual) > max_chars as usize),
+                                "hard width mismatch at {max_chars}/{max_lines}: {visual:?}"
+                            );
+                        }
+                        assert!(!block.text.contains("le\nprocureur"));
+                        assert!(!block.text.contains("les\nenfants"), "max_chars={max_chars} max_lines={max_lines} line={:?}",block.text);
+                        assert!(!block.text.contains("de\nCSI"));
+                        // The phrase "avec son chien" is 14 characters,
+                        // so 12-char cards may have no legal syntactic fit.
+                        if max_chars >= 14 {
+                            assert!(!block.text.contains("avec\nson"));
+                        }
+                        // A single two-token name may exceed a deliberately
+                        // tiny visual width (12 chars); that constraint is
+                        // mathematically incompatible with name cohesion.
+                        if max_chars >= grapheme_len("Dustin Kjersem") as u32 {
+                            assert!(!block.text.contains("Dustin\nKjersem"));
+                        }
+                        assert!(!block.text.contains("7\nsaisons"));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn three_or_four_lines_are_used_when_the_preferred_syntax_requires_them() {
+        let src = transcription(&[
+            ("L'avocat",0.0,0.2),("explique",0.2,0.4),
+            ("les",0.4,0.5),("faits",0.5,0.7),
+            ("devant",0.7,0.9),("le",0.9,1.0),("tribunal,",1.0,1.3),
+            ("mais",1.3,1.5),("la",1.5,1.6),("famille",1.6,1.9),
+            ("reste",1.9,2.1),("sans",2.1,2.3),("réponse.",2.3,2.6),
+        ]);
+        let words = raw_words(&src);
+        let visual = best_layout(&words, 27, 4);
+        assert_eq!(*visual.last().unwrap(), words.len());
+        assert!(visual.len() >= 3, "expected 3+ natural visual lines: {visual:?}");
+        let mut start=0;
+        for end in visual {
+            assert!(segment_text_len(&words[start..end]) <= 27);
+            start=end;
+        }
     }
 }
