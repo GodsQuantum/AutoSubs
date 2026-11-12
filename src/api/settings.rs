@@ -131,6 +131,7 @@ pub async fn update_settings(
     settings.local_transcription_model = body.local_transcription_model;
     // The optional model is launched exclusively by AutoSubs as a short-lived
     // local subprocess. Legacy external alignment endpoints are ignored.
+    let _ = (body.alignment_required, &body.alignment_url);
     settings.alignment_enabled = body.alignment_enabled;
     settings.alignment_required = false;
     settings.alignment_url.clear();
