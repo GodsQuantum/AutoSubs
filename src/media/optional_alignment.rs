@@ -38,8 +38,7 @@ pub fn parse_aligned_words(output: &str, exact_asr_text: &str) -> Result<Vec<Raw
         r"(?m)^(\d+)\r?\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\r?\n([^\r\n]+)",
     )?;
     let mut words = Vec::new();
-    let mut next_index = 1_usize;
-    for captures in pattern.captures_iter(output) {
+    for (next_index, captures) in (1_usize..).zip(pattern.captures_iter(output)) {
         let number = captures[1].parse::<usize>()?;
         if number != next_index {
             bail!("forced aligner cue index is not continuous: {number} != {next_index}");
@@ -55,7 +54,6 @@ pub fn parse_aligned_words(output: &str, exact_asr_text: &str) -> Result<Vec<Raw
             start: Some(start),
             end: Some(end),
         });
-        next_index += 1;
         if words.len() > 30_000 {
             bail!("forced alignment contains too many words");
         }
