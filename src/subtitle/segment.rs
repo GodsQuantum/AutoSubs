@@ -138,23 +138,146 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
     if left.chars().next().is_some_and(char::is_uppercase)
         && right.chars().next().is_some_and(char::is_uppercase)
         && !matches!(r.as_str(), "mais" | "donc" | "alors" | "cependant")
-        && !matches!(l.as_str(), "je" | "tu" | "il" | "elle" | "on" | "nous" | "vous")
+        && !matches!(
+            l.as_str(),
+            "je" | "tu" | "il" | "elle" | "on" | "nous" | "vous"
+        )
     {
         return true;
     }
 
     const FORWARD: &[&str] = &[
-        "le", "la", "les", "l", "un", "une", "des", "du", "de", "d", "au", "aux", "à", "en",
-        "pour", "sur", "sous", "dans", "par", "avec", "sans", "chez", "vers", "je", "j", "tu",
-        "il", "elle", "on", "nous", "ils", "elles", "me", "m", "te", "t", "se", "s", "lui", "leur",
-        "y", "ce", "cet", "cette", "ces", "c", "mon", "ton", "son", "ma", "ta", "sa", "mes", "tes",
-        "ses", "notre", "votre", "nos", "vos", "leurs", "ne", "n", "très", "trop", "plus", "moins",
-        "bien", "si", "qui", "que", "qu", "quoi", "dont", "où", "quand", "comment", "pourquoi",
-        "et", "ou", "mais", "donc", "or", "ni", "car", "parce", "tandis", "jusqu", "jusque",
-        "afin", "tel", "telle", "tels", "telles", "quel", "quelle", "quels", "quelles",  "c'est", "c’est", "j'ai", "j’ai", "qu'il", "qu’elle", "qu'elle", "qu’il",
-        "alors", "ainsi", "a", "ai", "as", "avons", "avez", "ont", "suis", "es", "est", "sommes",
-        "êtes", "sont", "étais", "était", "étions", "étiez", "étaient", "été", "être", "sera",
-        "seras", "serons", "serez", "seront",
+        "le",
+        "la",
+        "les",
+        "l",
+        "un",
+        "une",
+        "des",
+        "du",
+        "de",
+        "d",
+        "au",
+        "aux",
+        "à",
+        "en",
+        "pour",
+        "sur",
+        "sous",
+        "dans",
+        "par",
+        "avec",
+        "sans",
+        "chez",
+        "vers",
+        "je",
+        "j",
+        "tu",
+        "il",
+        "elle",
+        "on",
+        "nous",
+        "ils",
+        "elles",
+        "me",
+        "m",
+        "te",
+        "t",
+        "se",
+        "s",
+        "lui",
+        "leur",
+        "y",
+        "ce",
+        "cet",
+        "cette",
+        "ces",
+        "c",
+        "mon",
+        "ton",
+        "son",
+        "ma",
+        "ta",
+        "sa",
+        "mes",
+        "tes",
+        "ses",
+        "notre",
+        "votre",
+        "nos",
+        "vos",
+        "leurs",
+        "ne",
+        "n",
+        "très",
+        "trop",
+        "plus",
+        "moins",
+        "bien",
+        "si",
+        "qui",
+        "que",
+        "qu",
+        "quoi",
+        "dont",
+        "où",
+        "quand",
+        "comment",
+        "pourquoi",
+        "et",
+        "ou",
+        "mais",
+        "donc",
+        "or",
+        "ni",
+        "car",
+        "parce",
+        "tandis",
+        "jusqu",
+        "jusque",
+        "afin",
+        "tel",
+        "telle",
+        "tels",
+        "telles",
+        "quel",
+        "quelle",
+        "quels",
+        "quelles",
+        "c'est",
+        "c’est",
+        "j'ai",
+        "j’ai",
+        "qu'il",
+        "qu’elle",
+        "qu'elle",
+        "qu’il",
+        "alors",
+        "ainsi",
+        "a",
+        "ai",
+        "as",
+        "avons",
+        "avez",
+        "ont",
+        "suis",
+        "es",
+        "est",
+        "sommes",
+        "êtes",
+        "sont",
+        "étais",
+        "était",
+        "étions",
+        "étiez",
+        "étaient",
+        "été",
+        "être",
+        "sera",
+        "seras",
+        "serons",
+        "serez",
+        "seront",
     ];
     const BACKWARD: &[&str] = &[
         "pas", "plus", "jamais", "rien", "personne", "de", "du", "des", "à", "au", "aux", "of",
@@ -201,16 +324,18 @@ fn pair_is_priority_glue(left: &str, right: &str) -> bool {
     let l = cleaned_word(left);
     let r = cleaned_word(right);
     const DETERMINERS: &[&str] = &[
-        "le", "la", "les", "un", "une", "des", "du", "au", "aux", "ce",
-        "cet", "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes",
-        "son", "sa", "ses", "notre", "votre", "nos", "vos", "leurs",
-        "quel", "quelle", "quels", "quelles",
+        "le", "la", "les", "un", "une", "des", "du", "au", "aux", "ce", "cet", "cette", "ces",
+        "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses", "notre", "votre", "nos", "vos",
+        "leurs", "quel", "quelle", "quels", "quelles",
     ];
     DETERMINERS.contains(&l.as_str())
         || l.chars().all(|c| c.is_ascii_digit())
         || (left.chars().next().is_some_and(char::is_uppercase)
             && right.chars().next().is_some_and(char::is_uppercase)
-            && !matches!(l.as_str(), "je" | "tu" | "il" | "elle" | "on" | "nous" | "vous")
+            && !matches!(
+                l.as_str(),
+                "je" | "tu" | "il" | "elle" | "on" | "nous" | "vous"
+            )
             && !matches!(r.as_str(), "mais" | "donc" | "alors"))
 }
 
@@ -588,9 +713,7 @@ fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Ve
                         + line_cost(part, max_chars, is_final)
                         + if row > 1 { 34.0 } else { 0.0 };
                     if begin > 0 {
-                        score += boundary_penalty(
-                            &words[begin - 1].word, &words[begin].word,
-                        );
+                        score += boundary_penalty(&words[begin - 1].word, &words[begin].word);
                         // Existing subtitle conventions prefer a visually
                         // heavier final line, but never above grammatical
                         // attachment or speech timing.
@@ -612,7 +735,8 @@ fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Ve
             }
         }
 
-        let lines = (1..=limit).filter(|&row| dp[row][n].is_finite())
+        let lines = (1..=limit)
+            .filter(|&row| dp[row][n].is_finite())
             .min_by(|&a, &b| dp[a][n].total_cmp(&dp[b][n]))?;
         let mut boundaries = Vec::with_capacity(lines);
         let mut row = lines;
@@ -1240,7 +1364,11 @@ mod tests {
         let lines = group_transcription_into_lines_with_layout(&input, options);
         assert!(lines.iter().all(|line| line.text.lines().count() <= 4));
         assert!(lines.iter().any(|line| line.text.lines().count() >= 3));
-        assert!(lines.iter().all(|line| line.text.lines().all(|l| grapheme_len(l) <= 80)));
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.text.lines().all(|l| grapheme_len(l) <= 80))
+        );
     }
 
     #[test]
@@ -1606,26 +1734,35 @@ mod tests {
             for max_lines in [1_u32, 2, 3, 4] {
                 for line in corpus {
                     let tokens: Vec<_> = line.split_whitespace().collect();
-                    let raw: Vec<_> = tokens.iter().enumerate().map(|(i, word)| {
-                        (*word, i as f64 * 0.16, (i + 1) as f64 * 0.16)
-                    }).collect();
+                    let raw: Vec<_> = tokens
+                        .iter()
+                        .enumerate()
+                        .map(|(i, word)| (*word, i as f64 * 0.16, (i + 1) as f64 * 0.16))
+                        .collect();
                     let src = transcription(&raw);
                     let blocks = group_transcription_into_lines(&src, max_chars, max_lines);
-                    let flattened: Vec<_> = blocks.iter()
+                    let flattened: Vec<_> = blocks
+                        .iter()
                         .flat_map(|x| x.words.as_deref().unwrap_or(&[]).iter())
-                        .map(|w| w.word.clone()).collect();
+                        .map(|w| w.word.clone())
+                        .collect();
                     assert_eq!(flattened, tokens, "word loss at {max_chars}/{max_lines}");
                     for block in blocks {
                         assert!(block.text.lines().count() <= max_lines as usize);
                         for visual in block.text.lines() {
                             assert!(
-                                grapheme_len(visual) <= max_chars as usize ||
-                                (visual.split_whitespace().count() == 1 && grapheme_len(visual) > max_chars as usize),
+                                grapheme_len(visual) <= max_chars as usize
+                                    || (visual.split_whitespace().count() == 1
+                                        && grapheme_len(visual) > max_chars as usize),
                                 "hard width mismatch at {max_chars}/{max_lines}: {visual:?}"
                             );
                         }
                         assert!(!block.text.contains("le\nprocureur"));
-                        assert!(!block.text.contains("les\nenfants"), "max_chars={max_chars} max_lines={max_lines} line={:?}",block.text);
+                        assert!(
+                            !block.text.contains("les\nenfants"),
+                            "max_chars={max_chars} max_lines={max_lines} line={:?}",
+                            block.text
+                        );
                         assert!(!block.text.contains("de\nCSI"));
                         // The phrase "avec son chien" is 14 characters,
                         // so 12-char cards may have no legal syntactic fit.
@@ -1648,20 +1785,31 @@ mod tests {
     #[test]
     fn three_or_four_lines_are_used_when_the_preferred_syntax_requires_them() {
         let src = transcription(&[
-            ("L'avocat",0.0,0.2),("explique",0.2,0.4),
-            ("les",0.4,0.5),("faits",0.5,0.7),
-            ("devant",0.7,0.9),("le",0.9,1.0),("tribunal,",1.0,1.3),
-            ("mais",1.3,1.5),("la",1.5,1.6),("famille",1.6,1.9),
-            ("reste",1.9,2.1),("sans",2.1,2.3),("réponse.",2.3,2.6),
+            ("L'avocat", 0.0, 0.2),
+            ("explique", 0.2, 0.4),
+            ("les", 0.4, 0.5),
+            ("faits", 0.5, 0.7),
+            ("devant", 0.7, 0.9),
+            ("le", 0.9, 1.0),
+            ("tribunal,", 1.0, 1.3),
+            ("mais", 1.3, 1.5),
+            ("la", 1.5, 1.6),
+            ("famille", 1.6, 1.9),
+            ("reste", 1.9, 2.1),
+            ("sans", 2.1, 2.3),
+            ("réponse.", 2.3, 2.6),
         ]);
         let words = raw_words(&src);
         let visual = best_layout(&words, 27, 4);
         assert_eq!(*visual.last().unwrap(), words.len());
-        assert!(visual.len() >= 3, "expected 3+ natural visual lines: {visual:?}");
-        let mut start=0;
+        assert!(
+            visual.len() >= 3,
+            "expected 3+ natural visual lines: {visual:?}"
+        );
+        let mut start = 0;
         for end in visual {
             assert!(segment_text_len(&words[start..end]) <= 27);
-            start=end;
+            start = end;
         }
     }
 }
