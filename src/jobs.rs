@@ -1977,7 +1977,7 @@ mod tests {
         *state.brands.write().await = vec![brand];
 
         let resolved =
-            resolve_effective_preset(&state, "CHougar_episode.mp4", None, Some("generic"))
+            resolve_effective_preset(&state, "SaMpLe_episode.mp4", None, Some("generic"))
                 .await
                 .unwrap();
 
