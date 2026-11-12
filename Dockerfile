@@ -81,14 +81,23 @@ RUN set -eu; \
     useradd --uid 1000 --gid 1000 --home-dir /nonexistent --shell /usr/sbin/nologin autosubs; \
     mkdir -p /app/frontend /config /data /fonts /media; \
     chown -R 1000:1000 /config /data /fonts /media
-# Optional, one-shot word alignment for text-only ASR engines. Immutable
-# upstream Vulkan release, digest verified by Docker BuildKit (v0.8.53).
-# The model itself is stored separately under /data/models and never
-# loaded when an ASR engine already supplies native word timestamps.
-ADD --checksum=sha256:0992449c05b6dd1fc38351b171d510912d4c48037f934995ca8015fbaaad4f67 https://github.com/CrispStrobe/CrispASR/releases/download/v0.8.53/crispasr-linux-x86_64-vulkan.tar.gz /tmp/crispasr-vulkan.tar.gz
-RUN mkdir -p /opt/crispasr && \
-    tar -xzf /tmp/crispasr-vulkan.tar.gz -C /opt/crispasr --strip-components=1 && \
-    rm -f /tmp/crispasr-vulkan.tar.gz && \
+# Optional, one-shot word alignment for text-only ASR engines.
+# Use only official CrispASR v0.8.53 release assets for the build platform:
+# AMD64 Vulkan, ARM64 CPU. GitHub-published SHA256 is verified before unpack.
+# Native word-timed ASR never launches this optional helper.
+ARG TARGETARCH
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) archive=crispasr-linux-x86_64-vulkan.tar.gz; digest=0992449c05b6dd1fc38351b171d510912d4c48037f934995ca8015fbaaad4f67 ;; \
+      arm64) archive=crispasr-linux-arm64.tar.gz; digest=a79c587b1c8cb8e006e52cfc804a640cdca942c0055f43c34fb615a94ec687c2 ;; \
+      *) echo "Unsupported CrispASR architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    curl -fLSs --retry 5 --retry-delay 2 \
+      -o /tmp/crispasr-release.tar.gz "https://github.com/CrispStrobe/CrispASR/releases/download/v0.8.53/$archive"; \
+    echo "$digest  /tmp/crispasr-release.tar.gz" | sha256sum -c -; \
+    mkdir -p /opt/crispasr; \
+    tar -xzf /tmp/crispasr-release.tar.gz -C /opt/crispasr --strip-components=1; \
+    rm -f /tmp/crispasr-release.tar.gz; \
     LD_LIBRARY_PATH=/opt/crispasr /opt/crispasr/crispasr --version | grep -F '0.8.53'
 ENV LD_LIBRARY_PATH=/opt/crispasr
 WORKDIR /app
