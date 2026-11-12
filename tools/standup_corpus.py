@@ -18,14 +18,18 @@ import urllib.error
 import urllib.request
 import uuid
 
-ROOT = Path("/srv/storage/production/active/Montage/Sources/Stand-Up")
-DB = Path("/srv/projects/Ssker Content Production/AutoSubs/standup-corpus.sqlite3")
-TMP_HOST = Path("/srv/lxc/travail/appdata/autosubs/data/work/standup_corpus")
-TMP_CONTAINER = "/data/work/standup_corpus"
-STT = "http://192.0.2.42:8005/v1/audio/transcriptions"
-ALIGN = "http://192.0.2.42:8006/align"
-VAD = "http://192.0.2.42:8005/v1/audio/speech/timestamps"
-MODEL = "deepdml/faster-whisper-large-v3-turbo-ct2"
+# Operator-controlled inputs. No private host or network settings in source.
+ROOT = Path(os.environ.get("AUTOSUBS_CORPUS_ROOT", "/data/production-active")).expanduser()
+DB = Path(os.environ.get("AUTOSUBS_CORPUS_DB", "./standup-corpus.sqlite3")).expanduser()
+TMP_HOST = Path(os.environ.get("AUTOSUBS_CORPUS_TMP_HOST", "/tmp/autosubs-corpus")).expanduser()
+TMP_CONTAINER = os.environ.get("AUTOSUBS_CORPUS_TMP_CONTAINER", "/data/work/standup_corpus")
+CONTAINER_SOURCE = os.environ.get("AUTOSUBS_CORPUS_CONTAINER_ROOT", "/data/production-active").rstrip("/")
+STT = os.environ.get("AUTOSUBS_CORPUS_STT_URL", "http://127.0.0.1:8005/v1/audio/transcriptions")
+ALIGN = os.environ.get("AUTOSUBS_CORPUS_ALIGN_URL", "http://127.0.0.1:8006/align")
+VAD = os.environ.get("AUTOSUBS_CORPUS_VAD_URL", "http://127.0.0.1:8005/v1/audio/speech/timestamps")
+MODEL = os.environ.get("AUTOSUBS_CORPUS_ASR_MODEL", "deepdml/faster-whisper-large-v3-turbo-ct2")
+CONTAINER_NAME = os.environ.get("AUTOSUBS_CORPUS_CONTAINER", "autosubs")
+LXC_ID = os.environ.get("AUTOSUBS_CORPUS_LXC_ID")
 EXTS = {".mp4", ".mkv", ".mov", ".m4v", ".avi", ".webm"}
 CHUNK_SECONDS = 90
 
@@ -40,11 +44,12 @@ def db_open():
     return db
 
 def docker_cmd(*args, timeout=120):
-    return subprocess.run(["pct", "exec", "300", "--", "docker", "exec", "autosubs", *args],
+    prefix = ["pct", "exec", LXC_ID, "--"] if LXC_ID else []
+    return subprocess.run([*prefix, "docker", "exec", CONTAINER_NAME, *args],
                           text=True, capture_output=True, timeout=timeout, check=True).stdout
 
 def duration_seconds(video):
-    source = "/data/production-active/" + video.relative_to(Path("/srv/storage/production/active")).as_posix()
+    source = CONTAINER_SOURCE + "/" + video.relative_to(ROOT).as_posix()
     data = docker_cmd("ffprobe", "-v", "error", "-show_entries", "format=duration",
                       "-of", "default=noprint_wrappers=1:nokey=1", source)
     value = float(data.strip())
@@ -109,7 +114,7 @@ def get_words_retry(video, start, n, language, attempts=3):
 def get_words(segment, start, n, language):
     clip_host = TMP_HOST / f"clip-{os.getpid()}-{uuid.uuid4().hex}.wav"
     clip_docker = f"{TMP_CONTAINER}/{clip_host.name}"
-    source = "/data/production-active/" + segment.relative_to(Path("/srv/storage/production/active")).as_posix()
+    source = CONTAINER_SOURCE + "/" + segment.relative_to(ROOT).as_posix()
     try:
         docker_cmd("ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
                    "-ss", f"{start:.3f}", "-i", source, "-t", f"{n:.3f}", "-vn",
