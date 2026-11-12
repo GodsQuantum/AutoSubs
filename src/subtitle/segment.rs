@@ -6,7 +6,6 @@ use std::sync::OnceLock;
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 use unicode_segmentation::UnicodeSegmentation;
 
-static PROTECTED_TOKEN_RE: OnceLock<Regex> = OnceLock::new();
 static ABBREVIATION_RE: OnceLock<Regex> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy)]
@@ -28,12 +27,6 @@ fn effective_max_chars(options: LayoutOptions) -> usize {
     (options.max_chars.clamp(1, 256) as f64)
         .min(metric_limit.floor())
         .max(1.0) as usize
-}
-
-fn protected_token_re() -> &'static Regex {
-    PROTECTED_TOKEN_RE.get_or_init(|| Regex::new(
-        r"(?i)^(?:https?://\S+|www\.\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|[@#][\p{L}\p{N}_]+|\d+(?:[.,:/-]\d+)+|[\p{L}]+(?:['’][\p{L}]+)+)$"
-    ).expect("valid protected token regex"))
 }
 
 fn abbreviation_re() -> &'static Regex {
