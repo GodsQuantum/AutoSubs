@@ -1962,15 +1962,15 @@ mod tests {
             ..Preset::default()
         };
         let brand = Brand {
-            id: "chougar".into(),
-            name: "Chougar".into(),
+            id: "sample".into(),
+            name: "sample".into(),
             description: String::new(),
             assets: Default::default(),
             preset_ids: vec!["brand-default".into()],
             default_preset_by_format: [(FormatKey::Source, "brand-default".into())]
                 .into_iter()
                 .collect(),
-            match_keywords: Some("chougar,cf".into()),
+            match_keywords: Some("sample,cf".into()),
             highlight_color: Some("#ff00aa".into()),
         };
         *state.presets.write().await = vec![generic, brand_default];
@@ -1985,7 +1985,7 @@ mod tests {
         assert_eq!(resolved.preset.max_chars, 18);
         assert_eq!(resolved.preset.max_lines, 1);
         assert_eq!(resolved.preset.highlight_color, "#ff00aa");
-        assert_eq!(resolved.brand_id.as_deref(), Some("chougar"));
+        assert_eq!(resolved.brand_id.as_deref(), Some("sample"));
     }
 
     #[tokio::test]

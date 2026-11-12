@@ -1,13 +1,14 @@
 [Unit]
 Description=AutoSubs stand-up corpus - aligned SRT/Markdown/FTS5 (Cloud9)
-Documentation=https://github.com/GodsQuantum/AutoSubs/blob/main/tools/STANDUP_CORPUS_CLOUD9.md
+Documentation=https://github.com/GodsQuantum/AutoSubs/blob/main/tools/CORPUS.md
 Wants=network-online.target
 After=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 -u "/srv/storage/nvme/DEV/Projets/Ssker Content Production/AutoSubs/repo/tools/standup_corpus.py" run
+EnvironmentFile=-/etc/autosubs/standup-corpus.env
+ExecStart=/usr/bin/python3 -u /opt/autosubs/tools/standup_corpus.py run
 Restart=on-failure
 RestartSec=300s
 Nice=12

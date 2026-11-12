@@ -195,7 +195,7 @@ mod tests {
     fn accept_loopback_and_private_lan_only() {
         for address in [
             "http://127.0.0.1:8005",
-            "http://192.168.1.219:8005",
+            "http://172.20.20.10:8005",
             "http://10.20.30.40:8005",
             "http://172.31.255.254:8005",
             "http://[::1]:8005",
@@ -211,7 +211,7 @@ mod tests {
             "http://169.254.169.254/latest/meta-data",
             "http://8.8.8.8:8005",
             "http://example.com:8005",
-            "http://192.168.1.219:8005/admin",
+            "http://172.20.20.10:8005/admin",
             "http://user:pass@127.0.0.1:8005",
             "file:///etc/passwd",
             "http://127.0.0.1:8005?url=x",

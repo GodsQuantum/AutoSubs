@@ -16,7 +16,7 @@ Make AutoSubs robust for French short-form production: no stray spaces around hy
 - Keep AutoSubs resource usage low and update only dependencies/toolchain justified by verification.
 
 ## Storage
-Expose production-active, production-sources, cloud-arezki, cloud-family, cloud-fella, cloud-apps, media, and downloads. Backup-local remains excluded because it is backup infrastructure, not a production source library.
+Expose production-active, production-sources, cloud-sample, cloud-family, cloud-sample-user, cloud-apps, media, and downloads. Backup-local remains excluded because it is backup infrastructure, not a production source library.
 
 ## Verification
 Use RED→GREEN regression tests, full Rust/frontend suites, clippy/fmt, frontend check/build, container build/smoke, live workflow/picker checks, and post-deploy health/resource verification.
