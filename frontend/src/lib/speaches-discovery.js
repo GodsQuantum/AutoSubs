@@ -1,4 +1,5 @@
 const MODEL_PREFS = [
+  'handy-computer/parakeet-ultra-gguf',
   'deepdml/faster-whisper-large-v3-turbo-ct2',
   'Systran/faster-whisper-large-v3',
 ];
@@ -43,14 +44,14 @@ export async function probeSpeaches(value, fetcher = fetch) {
   if (!health || !Array.isArray(models?.data)) throw new Error('Invalid Cloud9-Speaches API response');
   const ids = /** @type {{id?:string}[]} */ (models.data).map(x => x?.id).filter(x => typeof x === 'string');
   const model = MODEL_PREFS.find(x => ids.includes(x));
-  if (!model) throw new Error('No supported Whisper Turbo model is installed');
+  if (!model) throw new Error('No supported word-timestamp ASR model is installed');
   return {
     origin,
     transcriptionUrl: origin + '/v1/audio/transcriptions',
     alignmentUrl: '',
     model,
     alignmentModel: '',
-    backend: 'whisper-native-words',
+    backend: model.includes('parakeet-ultra') ? 'parakeet-ultra-ctc-words' : 'whisper-native-words',
     backendVerified: false,
   };
 }

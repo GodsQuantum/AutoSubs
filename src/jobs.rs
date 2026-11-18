@@ -235,11 +235,31 @@ fn validated_native_word_timeline(
         .ok_or_else(|| {
             anyhow!(
                 "the selected ASR engine has no native word timestamps; \
-             use a word-timestamp-capable model (Faster-Whisper)"
+             use a word-timestamp-capable model (Parakeet Ultra / Faster-Whisper)"
             )
         })?;
     if !media_duration.is_finite() || media_duration <= 0.0 {
         bail!("invalid source audio duration");
+    }
+    // The provider must timestamp every recognized lexical character.
+    // Whitespace-only token-count differences are allowed (punctuation or
+    // clitics); silently dropping a real word is not.
+    if let Some(text) = &transcription.text {
+        let letters = |value: &str| {
+            value
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .flat_map(char::to_lowercase)
+                .collect::<String>()
+        };
+        let timed_text: String = native
+            .iter()
+            .filter_map(|word| word.word.as_deref())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if letters(text) != letters(&timed_text) {
+            bail!("ASR native word timestamps omit or alter recognized text");
+        }
     }
     let mut grouped = Vec::<RawWord>::with_capacity(native.len());
     let mut pending = Vec::<String>::new();
@@ -2225,6 +2245,64 @@ mod tests {
     }
 
     #[test]
+    fn reject_native_word_timestamps_when_recognized_word_is_missing() {
+        let input = TranscriptionResponse {
+            text: Some("bonjour les amis".into()),
+            words: Some(vec![
+                RawWord {
+                    word: Some("bonjour".into()),
+                    start: Some(0.1),
+                    end: Some(0.45),
+                },
+                RawWord {
+                    word: Some("amis".into()),
+                    start: Some(0.55),
+                    end: Some(0.85),
+                },
+            ]),
+            segments: None,
+        };
+        assert!(
+            validated_native_word_timeline(&input, 1.0)
+                .unwrap_err()
+                .to_string()
+                .contains("omit or alter")
+        );
+    }
+
+    #[test]
+    fn accept_native_word_timings_when_whitespace_tokens_differ_but_lexemes_match() {
+        let input = TranscriptionResponse {
+            text: Some("aujourd'hui est magnifique".into()),
+            words: Some(vec![
+                RawWord {
+                    word: Some("aujourd'".into()),
+                    start: Some(0.1),
+                    end: Some(0.35),
+                },
+                RawWord {
+                    word: Some("hui".into()),
+                    start: Some(0.35),
+                    end: Some(0.55),
+                },
+                RawWord {
+                    word: Some("est".into()),
+                    start: Some(0.55),
+                    end: Some(0.7),
+                },
+                RawWord {
+                    word: Some("magnifique".into()),
+                    start: Some(0.7),
+                    end: Some(1.2),
+                },
+            ]),
+            segments: None,
+        };
+        let line = validated_native_word_timeline(&input, 1.3).unwrap();
+        assert_eq!(line.timing_quality, TimingQuality::Exact);
+    }
+
+    #[test]
     fn coalesce_zero_span_whisper_clitics_without_inventing_times_or_words() {
         let src = TranscriptionResponse {
             text: Some("C'est qu'il y a un mec. Mais souvent.".into()),
@@ -2292,6 +2370,16 @@ mod tests {
                 end: Some(1.55 + idx as f64 * 0.10),
             });
         }
+        // The text-only reference must include every timed lexical word.
+        // The previous fixture appended 120 word spans without transcript text.
+        let filler = (0..120)
+            .map(|idx| format!("suite{idx}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        realistic.text = Some(format!(
+            "{} {filler}",
+            src.text.as_deref().unwrap_or_default()
+        ));
         let timeline = validated_native_word_timeline(&realistic, 14.0).unwrap();
         assert_eq!(timeline.timing_quality, TimingQuality::Inferred);
         assert_eq!(timeline.words[0].word, "C'est");

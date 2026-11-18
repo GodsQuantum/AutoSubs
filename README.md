@@ -22,7 +22,7 @@
 
 ---
 
-AutoSubs is for the part that happens **after you have a video**: get word timings from Whisper/Speaches or import an existing subtitle file, clean up the text, repair bad timing, style it once, preview the right canvas, and let FFmpeg burn it with libass. For recurring work, a Workflow watches a folder and runs the same pipeline automatically.
+AutoSubs is for the part that happens **after you have a video**: get acoustically aligned word timings from Speaches Parakeet Ultra (default), or from Whisper or import an existing subtitle file, clean up the text, repair bad timing, style it once, preview the right canvas, and let FFmpeg burn it with libass. For recurring work, a Workflow watches a folder and runs the same pipeline automatically.
 
 It is deliberately not a browser-only subtitle toy. The Rust backend owns timing normalization, segmentation, persistence, rendering and workflow state. The web UI is a client of that API, so manual jobs and automated jobs go through the same rules.
 
@@ -315,7 +315,7 @@ In the Editor, scrub through the video preview and mark **Start here** and **End
 
 ### Cloud9 stand-up transcript/search utility
 
-A local optional Python 3 utility under `tools/standup_corpus.py` inventories the stand-up media folder on Cloud9, chunks audio for the existing Speaches/WhisperX alignment services, saves same-stem Markdown/SRT/word-timestamp JSON sidecars, and updates an SQLite FTS5 search index with absolute video timestamps. The corpus utility is optional and Cloud9-specific; it is **not** enabled for general Docker or AppImage installs. See `tools/STANDUP_CORPUS_CLOUD9.md` for service setup, status, query examples, and original-media safeguards.
+A local optional Python 3 utility under `tools/standup_corpus.py` inventories the stand-up media folder on Cloud9, chunks audio for the existing Speaches Parakeet Ultra native word-timing API (without a separate aligner), saves same-stem Markdown/SRT/word-timestamp JSON sidecars, and updates an SQLite FTS5 search index with absolute video timestamps. The corpus utility is optional and Cloud9-specific; it is **not** enabled for general Docker or AppImage installs. See `tools/STANDUP_CORPUS_CLOUD9.md` for service setup, status, query examples, and original-media safeguards.
 
 ## Development
 

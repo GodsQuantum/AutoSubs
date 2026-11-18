@@ -63,9 +63,13 @@ pub(crate) fn models_endpoint(url: &str) -> String {
 }
 
 // Capability-gated requests, not a hardwired option for every model.
-fn supports_whisper_word_timestamps(model: &str) -> bool {
+fn supports_native_word_timestamps(model: &str) -> bool {
     let model = model.trim().to_ascii_lowercase();
-    model.contains("whisper") || model.ends_with("-ct2") || model.contains("/ct2")
+    model.contains("whisper")
+        || model.ends_with("-ct2")
+        || model.contains("/ct2")
+        || model.ends_with("/parakeet-ultra-gguf")
+        || model == "parakeet-ultra-gguf"
 }
 
 async fn request_endpoint(
@@ -88,22 +92,22 @@ async fn request_endpoint(
         .file_name("audio.wav")
         .mime_str("audio/wav")
         .map_err(TranscriptionError::Http)?;
-    // Whisper/CT2 implement the OpenAI verbose_json word timestamp extension.
-    // Other OpenAI-compatible ASR engines (notably Qwen3-ASR GGUF) may reject
-    // timestamp_granularities with 422/503 even when plain JSON is supported.
+    // Whisper/CT2 and Speaches Parakeet Ultra (strict native CTC) support the
+    // OpenAI verbose_json word timestamp extension. Other ASR engines, such as
+    // Qwen3-ASR and Parakeet TDT, may reject timestamp_granularities.
     // Parse any native words they return, but NEVER synthesize or silently
     // assert native timings if the response is only text. The AutoSubs job
     // gate can invoke its optional one-shot aligner or fail closed.
-    let wants_whisper_words = supports_whisper_word_timestamps(model);
+    let wants_native_words = supports_native_word_timestamps(model);
     let mut form = multipart::Form::new().part("file", part).text(
         "response_format",
-        if wants_whisper_words {
+        if wants_native_words {
             "verbose_json"
         } else {
             "json"
         },
     );
-    if wants_whisper_words {
+    if wants_native_words {
         form = form.text("timestamp_granularities[]", "word");
     }
     if !model.trim().is_empty() {
@@ -270,18 +274,24 @@ mod endpoint_regression_tests {
 
     #[test]
     fn request_word_timestamp_capability_is_model_aware() {
-        assert!(supports_whisper_word_timestamps(
+        assert!(supports_native_word_timestamps(
             "deepdml/faster-whisper-large-v3-turbo-ct2"
         ));
-        assert!(supports_whisper_word_timestamps("whisper-large-v3-turbo"));
-        assert!(supports_whisper_word_timestamps("whisper-1"));
-        assert!(!supports_whisper_word_timestamps(
+        assert!(supports_native_word_timestamps("whisper-large-v3-turbo"));
+        assert!(supports_native_word_timestamps("whisper-1"));
+        assert!(supports_native_word_timestamps(
+            "handy-computer/parakeet-ultra-gguf"
+        ));
+        assert!(supports_native_word_timestamps(
+            "other-provider/parakeet-ultra-gguf"
+        ));
+        assert!(!supports_native_word_timestamps(
             "handy-computer/Qwen3-ASR-1.7B-gguf"
         ));
-        assert!(!supports_whisper_word_timestamps(
+        assert!(!supports_native_word_timestamps(
             "nvidia/parakeet-tdt-0.6b-v3"
         ));
-        assert!(!supports_whisper_word_timestamps("gpt-transcribe"));
+        assert!(!supports_native_word_timestamps("gpt-transcribe"));
     }
 
     #[tokio::test]
