@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cloud9 stand-up corpus: lossless source preservation, aligned word sidecars, searchable index.
-Uses the existing AutoSubs Docker FFmpeg and Cloud9-Speaches/WhisperX. Python stdlib only.
+Uses the existing AutoSubs Docker FFmpeg and Cloud9-Speaches Parakeet Ultra native word alignment. Python stdlib only.
 """
 import argparse
 import datetime as dt
@@ -25,9 +25,8 @@ TMP_HOST = Path(os.environ.get("AUTOSUBS_CORPUS_TMP_HOST", "/tmp/autosubs-corpus
 TMP_CONTAINER = os.environ.get("AUTOSUBS_CORPUS_TMP_CONTAINER", "/data/work/standup_corpus")
 CONTAINER_SOURCE = os.environ.get("AUTOSUBS_CORPUS_CONTAINER_ROOT", "/data/production-active").rstrip("/")
 STT = os.environ.get("AUTOSUBS_CORPUS_STT_URL", "http://127.0.0.1:8005/v1/audio/transcriptions")
-ALIGN = os.environ.get("AUTOSUBS_CORPUS_ALIGN_URL", "http://127.0.0.1:8006/align")
 VAD = os.environ.get("AUTOSUBS_CORPUS_VAD_URL", "http://127.0.0.1:8005/v1/audio/speech/timestamps")
-MODEL = os.environ.get("AUTOSUBS_CORPUS_ASR_MODEL", "deepdml/faster-whisper-large-v3-turbo-ct2")
+MODEL = os.environ.get("AUTOSUBS_CORPUS_ASR_MODEL", "handy-computer/parakeet-ultra-gguf")
 CONTAINER_NAME = os.environ.get("AUTOSUBS_CORPUS_CONTAINER", "autosubs")
 LXC_ID = os.environ.get("AUTOSUBS_CORPUS_LXC_ID")
 EXTS = {".mp4", ".mkv", ".mov", ".m4v", ".avi", ".webm"}
@@ -73,9 +72,12 @@ def multipart(fields, filename, contents, url, timeout=600):
         raise RuntimeError(f"{url}: HTTP {exc.code}: {exc.read(900)!r}") from exc
 
 def transcription_options(language):
-    # Speaches word-granularity itself calls the same remote aligner and fails 503
-    # if it is briefly down. Align exactly once, explicitly, after STT.
-    return {"model": MODEL, "language": language, "response_format": "verbose_json"}
+    if not str(language).strip():
+        raise ValueError("Parakeet Ultra strict word alignment requires an explicit language")
+    # One Speaches request gives the transcript AND acoustically grounded words.
+    # No secondary aligner, no interpolation and no replacement of ASR text.
+    return {"model": MODEL, "language": language, "response_format": "verbose_json",
+            "timestamp_granularities[]": "word"}
 
 def transcribe_text_or_silence(sound, language):
     try:
@@ -128,20 +130,21 @@ def get_words(segment, start, n, language):
             # Silent/music-only clips can hallucinate punctuation ("... ... ...").
             # Never publish punctuation-only phrases as spoken words.
             return []
-        aligned = multipart({"transcript": raw_text, "language": language},
-                            "clip.wav", sound, ALIGN)
-        output = aligned.get("result", aligned)
-        rows = output.get("word_segments") or output.get("words") or []
-        if not rows: raise ValueError("forced alignment returned no words")
+        rows = transcript.get("words") or []
+        if not rows:
+            raise ValueError("Parakeet Ultra native CTC returned no word timestamps")
+        def lexemes(value):
+            return "".join(ch.lower() for ch in value if ch.isalnum())
+        if lexemes(raw_text) != lexemes("".join(str(row.get("word") or "") for row in rows)):
+            raise ValueError("ASR word timestamps omit or alter transcript text")
         words = []
         last_end = -1.
         for row in rows:
             word = str(row.get("word") or row.get("text") or "").strip()
             b, e = float(row["start"]), float(row["end"])
-            if not word or not math.isfinite(b) or not math.isfinite(e) or b < 0 or e <= b or e > n+0.08 or b < last_end - .015:
-                raise ValueError(f"invalid forced alignment: {row!r}")
-            # Tiny overlap tolerance due to float rounding, do not invent timestamp uniformity.
-            b = max(b, last_end) if last_end >= 0 else b
+            if not word or not math.isfinite(b) or not math.isfinite(e) or b < 0 or e <= b or e > n+0.08 or b < last_end - .002:
+                raise ValueError(f"invalid native acoustic word timestamp: {row!r}")
+            # Preserve measured times, never fabricate or shift them.
             words.append({"word": word, "start": round(start+b, 3), "end": round(start+e, 3)})
             last_end = e
         return words
@@ -187,7 +190,7 @@ def markdown_output(video, words, duration, lang):
           f"- **Fichier** : `{safe_relative}`",
           f"- **Durée** : {timecode(duration)}",
           f"- **Langue** : {lang}",
-          f"- **Moteur** : {MODEL}; alignement WhisperX mot par mot",
+          f"- **Moteur** : {MODEL}; alignement acoustique natif mot par mot",
           "- **Horodatages** : temps absolu de la vidéo source",
           "- **Statut** : transcription automatique à vérifier avant publication",
           "", "## Transcription", ""]

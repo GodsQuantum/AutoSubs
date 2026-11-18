@@ -577,7 +577,7 @@ impl Default for Settings {
             local_transcription_api_key: std::env::var("AUTOSUBS_LOCAL_TRANSCRIPTION_API_KEY")
                 .unwrap_or_default(),
             local_transcription_model: std::env::var("AUTOSUBS_LOCAL_TRANSCRIPTION_MODEL")
-                .unwrap_or_else(|_| "large-v3".into()),
+                .unwrap_or_else(|_| "handy-computer/parakeet-ultra-gguf".into()),
             alignment_enabled: std::env::var("AUTOSUBS_ALIGNMENT_ENABLED")
                 .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
                 .unwrap_or(false),

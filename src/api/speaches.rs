@@ -12,6 +12,7 @@ use std::{
 };
 
 const MODEL_PREFS: &[&str] = &[
+    "handy-computer/parakeet-ultra-gguf",
     "deepdml/faster-whisper-large-v3-turbo-ct2",
     "Systran/faster-whisper-large-v3",
 ];
@@ -175,14 +176,20 @@ pub async fn probe(Json(request): Json<ProbeRequest>) -> AppResult<Json<ProbeRes
             ids.iter()
                 .any(|item| item.get("id").and_then(Value::as_str) == Some(**preference))
         })
-        .ok_or_else(|| AppError::BadRequest("No supported Whisper Turbo model available".into()))?;
+        .ok_or_else(|| {
+            AppError::BadRequest("No supported word-timestamp ASR model available".into())
+        })?;
     Ok(Json(ProbeResponse {
         transcription_url: format!("{origin}/v1/audio/transcriptions"),
         alignment_url: String::new(),
         origin,
         model: (*model).to_owned(),
         alignment_model: "",
-        backend: "whisper-native-words".to_owned(),
+        backend: if model.contains("parakeet-ultra") {
+            "parakeet-ultra-ctc-words".to_owned()
+        } else {
+            "whisper-native-words".to_owned()
+        },
         backend_verified: false, // Model metadata alone does not prove word timing.
     }))
 }

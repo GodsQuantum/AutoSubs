@@ -30,9 +30,19 @@ test('discovers native word-timestamp Whisper Turbo without forced aligner', asy
   assert.equal(calls.length,2);
 });
 
+test('prioritizes Parakeet Ultra when both supported ASR models are present', async () => {
+  const fake = async (url) => ({ok:true,json:async()=>url.endsWith('/v1/models')
+    ? {data:[{id:'deepdml/faster-whisper-large-v3-turbo-ct2'},{id:'handy-computer/parakeet-ultra-gguf'}]}
+    : {message:'OK'}});
+  const result = await probeSpeaches('http://127.0.0.1:8005',fake);
+  assert.equal(result.model,'handy-computer/parakeet-ultra-gguf');
+  assert.equal(result.backend,'parakeet-ultra-ctc-words');
+  assert.equal(result.backendVerified,false);
+});
+
 test('rejects missing Whisper model before changing settings', async () => {
   const fake = async (url) => ({ok:true,json:async()=>url.endsWith('/v1/models')?{data:[]}:{message:'OK'}});
-  await assert.rejects(() => probeSpeaches('http://127.0.0.1:8005',fake),/Whisper Turbo/);
+  await assert.rejects(() => probeSpeaches('http://127.0.0.1:8005',fake),/word-timestamp ASR model/);
 });
 
 test('one-click connection performs same-origin authenticated-app-server probe only', async () => {

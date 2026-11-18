@@ -22,7 +22,7 @@
 
 ---
 
-AutoSubs s'occupe de ce qui arrive **une fois la vidéo prête** : récupérer les timings mot-à-mot depuis Whisper/Speaches ou un fichier de sous-titres existant, corriger le texte, réparer les timings, appliquer un style, prévisualiser le bon format et laisser FFmpeg/libass incruster le résultat. Pour les traitements récurrents, un Workflow surveille un dossier et exécute le même pipeline automatiquement.
+AutoSubs s'occupe de ce qui arrive **une fois la vidéo prête** : récupérer les timings acoustiques mot-à-mot depuis Speaches/Parakeet Ultra (par défaut), ou Whisper ou un fichier de sous-titres existant, corriger le texte, réparer les timings, appliquer un style, prévisualiser le bon format et laisser FFmpeg/libass incruster le résultat. Pour les traitements récurrents, un Workflow surveille un dossier et exécute le même pipeline automatiquement.
 
 Le navigateur n'est pas le moteur métier. Rust possède la normalisation des timings, le découpage des lignes, la persistance, le rendu et l'état des workflows. L'UI appelle cette API : un traitement manuel et un traitement automatique passent donc par les mêmes règles.
 

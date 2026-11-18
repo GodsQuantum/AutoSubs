@@ -21,7 +21,11 @@
       const next: SettingsView = {
         ...previous, localTranscriptionEnabled: true, localFallbackEnabled: false,
         localTranscriptionUrl: found.transcriptionUrl,
-        localTranscriptionModel: found.model
+        localTranscriptionModel: found.model,
+        // Strict native CTC requires an explicit language; preserve existing selection.
+        language: found.model.includes('parakeet-ultra')
+          ? (previous.language.trim() || 'fr')
+          : previous.language
       };
       // Preserve all secret keys and the existing primary/OmniRoute provider.
       await api.saveSettings(next);
@@ -68,7 +72,7 @@
         <div class="field"><label for="speaches-connect-base">Cloud9-Speaches server URL</label><input id="speaches-connect-base" class="input" bind:value={speachesAddress} placeholder="http://127.0.0.1:8005"/></div>
         <div class="row wrap"><button class="btn primary" disabled={!loaded||speachesBusy} on:click={connectSpeaches}>{speachesBusy ? 'Checking…' : 'Connect Cloud9-Speaches'}</button>
           {#if speachesPrevious}<button class="btn" disabled={speachesBusy} on:click={undoSpeaches}>Undo connection</button>{/if}</div>
-        <p class="help">Uses Whisper Turbo native word timing, without any separate aligner; missing timestamps are rejected. For a Docker deployment on another machine, enter its reachable private-LAN HTTPS/HTTP address.</p>
+        <p class="help">Prefers Parakeet Ultra with native acoustic word alignment in Speaches. Missing or inferred word timestamps are rejected. Explicit language is required (French by default). For a Docker deployment on another machine, enter its reachable private-LAN HTTPS/HTTP address.</p>
       </div>
     </section>
     <section class="card"><div class="card-header"><strong>{$dictionary.primaryProvider}</strong></div><div class="card-body stack">
