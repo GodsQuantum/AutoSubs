@@ -31,6 +31,7 @@
   let shiftMs=0;
   let maxChars=25;
   let maxLines=2;
+  let maxWordsPerLine=0;
   let selectedPreset='';
   let formatKey:FormatKey='source';
   let fit:FitMode='preserve';
@@ -105,15 +106,15 @@
     const effective=j.effectivePreset??presets.find(p=>p.id===selectedPreset);
     const effectiveFormat=effective?.format??j.format;
     formatKey=effectiveFormat?.key??'source'; fit=effectiveFormat?.fit??'preserve'; previousFormatKey=formatKey; customWidth=effectiveFormat?.width??1080; customHeight=effectiveFormat?.height??1920;
-    if(effective){maxChars=effective.maxChars;maxLines=effective.maxLines;}
+    if(effective){maxChars=effective.maxChars;maxLines=effective.maxLines;maxWordsPerLine=effective.maxWordsPerLine??0;}
     renderProfile=j.renderProfile??'auto';
     renderOptions=undefined;renderOptionsJobId='';
     outroChoice=j.outro?.mode==='asset'?`asset:${j.outro.assetId}`:j.outro?.mode??'inherit';
   }
   function mark(){dirty=true;}
-  function applyPresetDefaults(){const p=presets.find(p=>p.id===selectedPreset);if(!p)return;formatKey=p.format.key;fit=p.format.fit;customWidth=p.format.width??1080;customHeight=p.format.height??1920;maxChars=p.maxChars;maxLines=p.maxLines;previousFormatKey=formatKey;}
+  function applyPresetDefaults(){const p=presets.find(p=>p.id===selectedPreset);if(!p)return;formatKey=p.format.key;fit=p.format.fit;customWidth=p.format.width??1080;customHeight=p.format.height??1920;maxChars=p.maxChars;maxLines=p.maxLines;maxWordsPerLine=p.maxWordsPerLine??0;previousFormatKey=formatKey;}
   async function save():Promise<boolean>{ if(!job)return false; saving=true; try{const r=await api.saveSubtitles(job.id,lines);lines=r.lines;report=r;dirty=false;await refresh();notify('success',$dictionary.saved);return true}catch(e){notify('error',e instanceof Error?e.message:String(e));return false}finally{saving=false} }
-  async function regroup(){if(!job)return;try{if(dirty && !(await save()))return;lines=await api.regroup(job.id,maxChars,maxLines);dirty=false;await refresh()}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
+  async function regroup(){if(!job)return;try{if(dirty && !(await save()))return;lines=await api.regroup(job.id,maxChars,maxLines,maxWordsPerLine);dirty=false;await refresh()}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
   function shiftAll(){const d=Number(shiftMs||0)/1000;lines=lines.map(l=>({...l,start:Math.max(0,l.start+d),end:Math.max(.02,l.end+d),words:l.words?.map(w=>({...w,start:Math.max(0,w.start+d),end:Math.max(.02,w.end+d)}))}));dirty=true}
   function replaceText(){if(!search)return; lines=lines.map(l=>({...l,text:l.text.split(search).join(replace)}));dirty=true}
   function removeFinalPeriods(){
@@ -141,7 +142,7 @@
     if(!job)return false;
     if(dirty && !(await save()))return false;
     if(formatKey==='custom' && (!Number.isInteger(Number(customWidth))||!Number.isInteger(Number(customHeight))||Number(customWidth)<16||Number(customHeight)<16||Number(customWidth)>16384||Number(customHeight)>16384||Number(customWidth)%2!==0||Number(customHeight)%2!==0)){notify('error',`${$dictionary.custom}: ${$dictionary.width} × ${$dictionary.height}`);return false;}
-    try{let applied:Job|undefined;if(selectedPreset){applied=await api.applyPreset(job.id,selectedPreset);lines=(applied.lines??lines).map(l=>({...l,words:l.words?.map(w=>({...w}))}));}await api.updateJob(job.id,{format:previewFormat,outro:jobOutro(),renderProfile});const effective=applied?.effectivePreset??job.effectivePreset;if(lines.length&&(!effective||effective.maxChars!==Number(maxChars)||effective.maxLines!==Number(maxLines)))lines=await api.regroup(job.id,Number(maxChars),Number(maxLines));await refresh();renderOptionsJobId='';notify('success',$dictionary.saved);return true}catch(e){notify('error',e instanceof Error?e.message:String(e));return false}
+    try{let applied:Job|undefined;if(selectedPreset){applied=await api.applyPreset(job.id,selectedPreset);lines=(applied.lines??lines).map(l=>({...l,words:l.words?.map(w=>({...w}))}));}await api.updateJob(job.id,{format:previewFormat,outro:jobOutro(),renderProfile});const effective=applied?.effectivePreset??job.effectivePreset;if(lines.length&&(!effective||effective.maxChars!==Number(maxChars)||effective.maxLines!==Number(maxLines)||(effective.maxWordsPerLine??0)!==Number(maxWordsPerLine)))lines=await api.regroup(job.id,Number(maxChars),Number(maxLines),Number(maxWordsPerLine));await refresh();renderOptionsJobId='';notify('success',$dictionary.saved);return true}catch(e){notify('error',e instanceof Error?e.message:String(e));return false}
   }
   async function render(){if(!job)return;try{if(dirty && !(await save()))return;if(!(await applyJob()))return;await api.render(job.id);await refresh()}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
   async function removeSidecar(){if(!job)return;try{await api.removeSidecar(job.id);await refresh();notify('success',$dictionary.prepared)}catch(e){notify('error',e instanceof Error?e.message:String(e))}}
@@ -272,7 +273,7 @@
         <section class="card">
           <div class="card-header"><strong>{$dictionary.segmentation}</strong></div>
           <div class="card-body stack">
-            <div class="grid two"><div class="field"><label for="editor-field-9">{$dictionary.maxChars}</label><input id="editor-field-9" class="input" type="number" min="5" max="42" bind:value={maxChars}/></div><div class="field"><label for="editor-field-10">{$dictionary.maxLines}</label><input id="editor-field-10" class="input" type="number" min="1" max="2" bind:value={maxLines}/></div></div>
+            <div class="grid two"><div class="field"><label for="editor-field-9">{$dictionary.maxChars}</label><input id="editor-field-9" class="input" type="number" min="5" max="84" bind:value={maxChars}/></div><div class="field"><label for="editor-field-10">{$dictionary.maxLines}</label><input id="editor-field-10" class="input" type="number" min="1" max="8" bind:value={maxLines}/></div><div class="field"><label for="editor-field-words">{$dictionary.maxWordsPerLine}</label><input id="editor-field-words" class="input" type="number" min="0" max="128" bind:value={maxWordsPerLine}/></div></div>
             <button class="btn" disabled={locked||!lines.length} on:click={regroup}>✦ {$dictionary.regroup}</button>
             <div class="help">{$dictionary.timingRepairHint}</div>
             {#if report}<div class="resource-meta"><span class="chip">{$dictionary.repairedOverlaps}: {report.repairedLineOverlaps}</span><span class="chip">{$dictionary.retimedLines}: {report.retimedWordLines}</span><span class="chip">{$dictionary.droppedEmpty}: {report.droppedEmptyLines}</span></div>{/if}

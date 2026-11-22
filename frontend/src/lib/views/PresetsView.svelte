@@ -40,7 +40,7 @@
     size:28,positionX:50,positionY:68,baseColor:'#ffffff',outlineColor:'#000000',
     highlightColor:'#3dd7cf',fontFamily:'Inter',uppercase:false,outlineThickness:2.5,
     shadowOffsetX:1.5,shadowOffsetY:1.5,shadowBlur:0,shadowOpacity:100,shadowColor:'#000000',
-    borderStyle:1,floating:false,maxChars:25,maxLines:2,wobbleSpeed:1,bold:true,italic:false,lineSpacing:0
+    borderStyle:1,floating:false,maxChars:25,maxLines:2,maxWordsPerLine:0,wobbleSpeed:1,bold:true,italic:false,lineSpacing:0
   };}
   const clone=(p:Preset):Preset=>JSON.parse(JSON.stringify(p));
   function create(){selected='';draft=makePreset();previousFormatKey=draft.format.key}
@@ -138,7 +138,7 @@
           <div class="card-header"><strong>{$dictionary.placement}</strong></div>
           <div class="card-body stack">
             <div class="grid two"><NumberSlider label={$dictionary.positionX} value={draft.positionX} min={0} max={100} step={0.5} unit="%" onChange={(value: number)=>draft={...draft,positionX:value}}/><NumberSlider label={$dictionary.positionY} value={draft.positionY} min={0} max={100} step={0.5} unit="%" onChange={(value: number)=>draft={...draft,positionY:value}}/></div>
-            <div class="grid two"><div class="field"><label for="presets-field-16">{$dictionary.maxChars}</label><input id="presets-field-16" class="input" type="number" min="5" max="42" bind:value={draft.maxChars}/></div><div class="field"><label for="presets-field-17">{$dictionary.maxLines}</label><input id="presets-field-17" class="input" type="number" min="1" max="2" bind:value={draft.maxLines}/></div></div>
+            <div class="grid two"><div class="field"><label for="presets-field-16">{$dictionary.maxChars}</label><input id="presets-field-16" class="input" type="number" min="5" max="84" bind:value={draft.maxChars}/></div><div class="field"><label for="presets-field-17">{$dictionary.maxLines}</label><input id="presets-field-17" class="input" type="number" min="1" max="8" bind:value={draft.maxLines}/></div><div class="field"><label for="presets-field-words">{$dictionary.maxWordsPerLine}</label><input id="presets-field-words" class="input" type="number" min="0" max="128" bind:value={draft.maxWordsPerLine}/></div></div>
             <div class="field"><label for="presets-field-18">{$dictionary.keywords}</label><input id="presets-field-18" class="input" bind:value={draft.matchKeywords} placeholder="shorts, reels, interview"/></div>
             <div class="grid two"><NumberSlider label={$dictionary.lineSpacing} value={draft.lineSpacing} min={-20} max={40} step={0.5} unit="px" onChange={(value: number)=>draft={...draft,lineSpacing:value}}/><NumberSlider label={$dictionary.wobbleSpeed} value={draft.wobbleSpeed} min={0.1} max={5} step={0.1} onChange={(value: number)=>draft={...draft,wobbleSpeed:value}}/></div>
           </div>
