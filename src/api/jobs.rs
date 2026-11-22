@@ -253,15 +253,23 @@ pub async fn save_subtitles(
 pub struct Regroup {
     max_chars: u32,
     max_lines: u32,
+    #[serde(default)]
+    max_words_per_line: Option<u32>,
 }
 pub async fn regroup(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<Regroup>,
 ) -> AppResult<Json<Vec<SubtitleLine>>> {
-    jobs::regroup_subtitles(&state, &id, body.max_chars, body.max_lines)
-        .map(Json)
-        .map_err(|e| AppError::Conflict(e.to_string()))
+    jobs::regroup_subtitles_with_options(
+        &state,
+        &id,
+        body.max_chars,
+        body.max_lines,
+        body.max_words_per_line,
+    )
+    .map(Json)
+    .map_err(|e| AppError::Conflict(e.to_string()))
 }
 
 #[derive(Deserialize)]

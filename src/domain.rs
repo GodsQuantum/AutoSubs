@@ -281,6 +281,8 @@ pub struct Preset {
     pub max_chars: u32,
     #[serde(default = "default_max_lines")]
     pub max_lines: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_words_per_line: Option<u32>,
     #[serde(default = "default_one")]
     pub wobble_speed: f64,
     #[serde(default = "default_true")]
@@ -324,6 +326,7 @@ impl Default for Preset {
             floating: false,
             max_chars: default_max_chars(),
             max_lines: default_max_lines(),
+            max_words_per_line: None,
             wobble_speed: 1.0,
             bold: true,
             italic: false,

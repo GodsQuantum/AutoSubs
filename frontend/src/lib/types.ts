@@ -13,7 +13,7 @@ export type AnimationStyle = 'pop'|'highlight'|'karaoke'|'word-by-word'|'fade'|'
 export interface Preset {
   id:string; name:string; brandId?:string; format:FormatProfile; animationStyle:AnimationStyle; size:number; positionX:number; positionY:number;
   baseColor:string; outlineColor:string; highlightColor:string; fontFamily:string; uppercase:boolean; outlineThickness:number; shadowThickness?:number;
-  shadowOffsetX?:number; shadowOffsetY?:number; shadowBlur?:number; shadowOpacity?:number; shadowColor?:string; borderStyle:number; floating:boolean; maxChars:number; maxLines:number; wobbleSpeed:number; bold:boolean; italic:boolean;
+  shadowOffsetX?:number; shadowOffsetY?:number; shadowBlur?:number; shadowOpacity?:number; shadowColor?:string; borderStyle:number; floating:boolean; maxChars:number; maxLines:number; maxWordsPerLine?:number|null; wobbleSpeed:number; bold:boolean; italic:boolean;
   matchKeywords?:string; lineSpacing:number; outroVideo?:string;
 }
 export interface BrandAssets { defaultOutro?:string; logo?:string }

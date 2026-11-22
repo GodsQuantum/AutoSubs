@@ -32,6 +32,7 @@ tokio-util = { version = "0.7", features = ["io", "rt"] }
 tower-http = { version = "0.7.1", features = ["fs", "set-header", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+icu_segmenter = "2.4.0"
 unicode-linebreak = "0.1.5"
 unicode-segmentation = "1"
 uuid = { version = "1", features = ["serde", "v4"] }

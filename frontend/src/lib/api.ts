@@ -34,7 +34,7 @@ export const api = {
   updateJob: (id: string, body: { presetId?: string | null; format?: FormatProfile; outro?: JobOutro; renderProfile?: RenderProfile }) => request<Job>(`/api/v1/jobs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   subtitles: (id: string) => request<SubtitleLine[]>(`/api/v1/jobs/${id}/subtitles`),
   saveSubtitles: (id: string, lines: SubtitleLine[]) => request<{lines:SubtitleLine[]; repairedLineOverlaps:number; retimedWordLines:number; droppedEmptyLines:number}>(`/api/v1/jobs/${id}/subtitles`, { method: 'PUT', body: JSON.stringify(lines) }),
-  regroup: (id: string, maxChars: number, maxLines: number) => request<SubtitleLine[]>(`/api/v1/jobs/${id}/regroup`, { method: 'POST', body: JSON.stringify({ maxChars, maxLines }) }),
+  regroup: (id: string, maxChars: number, maxLines: number, maxWordsPerLine = 0) => request<SubtitleLine[]>(`/api/v1/jobs/${id}/regroup`, { method: 'POST', body: JSON.stringify({ maxChars, maxLines, maxWordsPerLine: maxWordsPerLine > 0 ? maxWordsPerLine : null }) }),
   applyPreset: (id: string, presetId: string) => request<Job>(`/api/v1/jobs/${id}/apply-preset`, { method: 'POST', body: JSON.stringify({ presetId }) }),
   setSidecar: (id: string, path: string) => request<Job>(`/api/v1/jobs/${id}/sidecar`, { method: 'PUT', body: JSON.stringify({ path }) }),
   removeSidecar: (id: string) => request<Job>(`/api/v1/jobs/${id}/sidecar`, { method: 'DELETE' }),

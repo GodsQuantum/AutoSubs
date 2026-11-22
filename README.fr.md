@@ -50,7 +50,9 @@ Le navigateur n'est pas le moteur métier. Rust possède la normalisation des ti
 - **Découpage Unicode/français** — comptage par graphèmes, opportunités Unicode et règles de non-coupure françaises.
 - **Styles ASS/libass** — Pop, Surbrillance, Rebond, Karaoké, **Mot par mot**, Fondu, Slide-up ou aucun effet; polices, contour, ombre, position et couleur d'accent.
 - **Timings mot-à-mot durables** — la timeline canonique survit aux regroupements et modifications visuelles ; les animations utilisent les timings originaux. Le mode Mot par mot garde les élisions (`l'` + mot) et mots composés avec tiret dans une seule unité visuelle.
-- **Mise en page française** — segmentation syntaxique française et `maxLines` strict garantissent des retours explicites sans ligne cachée supplémentaire.
+- **Césures natives FR/EN/ZH** — déterminants, pronoms sujets et auxiliaires restent avec leurs groupes lorsque la largeur et les timings le permettent, y compris entre sous-titres successifs. Le chinois simplifié emploie le dictionnaire ICU4X et n’insère pas d’espaces artificiels entre les caractères Han.
+**Réglages :** maxChars (caractères par ligne), maxLines (1–8 lignes) et maxWordsPerLine (nombre maximal de mots par ligne, 0 = automatique) dans les presets et Regrouper. API /api/v1/jobs/{id}/regroup : champ facultatif maxWordsPerLine. Si la largeur est insuffisante, une césure moins naturelle peut être nécessaire ; les mots et horodatages acoustiques sont préservés.
+
 - **Cycle de vie complet** — édition, scission, fusion, suppression, retranscription et rerendu depuis la file et l'éditeur. Supprimer un job conserve la source et la sortie finale.
 - **Invariant Source** — Source + Conserver préserve la géométrie primaire sans scale, pad, crop ni bandes noires.
 - **Formats réels** — Source, 9:16, 16:9, 1:1, 4:5 et custom. La géométrie source est préservée par défaut ; `contain`, `cover` et `stretch` sont explicites.

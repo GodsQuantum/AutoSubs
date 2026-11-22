@@ -1,6 +1,7 @@
 use crate::domain::{
     RawWord, SubtitleLine, SubtitleWord, TimingQuality, TranscriptTimeline, TranscriptionResponse,
 };
+use icu_segmenter::{WordSegmenter, options::WordBreakInvariantOptions};
 use regex::Regex;
 use std::sync::OnceLock;
 use unicode_linebreak::{BreakOpportunity, linebreaks};
@@ -14,6 +15,7 @@ static ABBREVIATION_RE: OnceLock<Regex> = OnceLock::new();
 pub struct LayoutOptions {
     pub max_chars: u32,
     pub max_lines: u32,
+    pub max_words_per_line: Option<u32>,
     pub output_width: u32,
     pub font_size: f64,
 }
@@ -73,6 +75,13 @@ fn cleaned_word(word: &str) -> String {
                     | '”'
                     | '‘'
                     | '’'
+                    | '，'
+                    | '。'
+                    | '！'
+                    | '？'
+                    | '、'
+                    | '；'
+                    | '：'
             )
         })
         .to_lowercase()
@@ -94,8 +103,10 @@ fn hyphen_continuation(left: &str, right: &str) -> bool {
 fn pair_is_unbreakable(left: &str, right: &str) -> bool {
     let left = left.trim_end();
     let right = right.trim_start();
-    right.starts_with([',', '.', ';', ':', '!', '?', '…', ')', ']', '}', '»', '”'])
-        || left.ends_with(['(', '[', '{', '«', '“'])
+    right.starts_with([
+        ',', '.', ';', ':', '!', '?', '…', ')', ']', '}', '»', '”', '，', '。', '！', '？', '、',
+        '；', '：', '）', '》',
+    ]) || left.ends_with(['(', '[', '{', '«', '“', '（', '《'])
         || left.ends_with(['\'', '’'])
         || right.starts_with(['\'', '’'])
         || hyphen_continuation(left, right)
@@ -113,6 +124,42 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
     let left_trimmed = left.trim_end();
     let right_trimmed = right.trim_start();
     if pair_is_unbreakable(left_trimmed, right_trimmed) {
+        return true;
+    }
+    // CJK functional particles should remain attached to their phrase; their
+    // durations and text are preserved rather than faking whitespace words.
+    if matches!(
+        cleaned_word(right_trimmed).as_str(),
+        "们" | "的" | "地" | "得" | "了" | "吗" | "呢" | "吧" | "啊" | "呀"
+    ) {
+        return true;
+    }
+    if matches!(
+        left_trimmed,
+        "我" | "你" | "他" | "她" | "它" | "我们" | "你们" | "他们"
+    ) {
+        return true;
+    }
+    if left_trimmed.chars().count() == 1
+        && matches!(
+            left_trimmed,
+            "不" | "没"
+                | "很"
+                | "最"
+                | "把"
+                | "被"
+                | "给"
+                | "对"
+                | "从"
+                | "向"
+                | "会"
+                | "能"
+                | "要"
+                | "第"
+                | "这"
+                | "那"
+        )
+    {
         return true;
     }
     // Punctuation must win over subject/verb glue: no two sentences in
@@ -179,6 +226,7 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
         "elle",
         "on",
         "nous",
+        "vous",
         "ils",
         "elles",
         "me",
@@ -290,7 +338,8 @@ fn pair_is_bound(left: &str, right: &str) -> bool {
         "our", "their", "each", "every", "i", "you", "he", "she", "it", "we", "they", "am", "is",
         "are", "was", "were", "be", "been", "have", "has", "had", "will", "would", "can", "could",
         "should", "must", "do", "does", "did", "to", "of", "for", "with", "from", "at", "in", "on",
-        "by", "into", "not", "never", "very", "too", "much",
+        "by", "into", "not", "never", "very", "too", "much", "and", "or", "but", "because",
+        "although", "while", "however", "when",
     ];
     if FORWARD.contains(&l.as_str())
         || BACKWARD.contains(&r.as_str())
@@ -326,11 +375,55 @@ fn pair_is_priority_glue(left: &str, right: &str) -> bool {
     let l = cleaned_word(left);
     let r = cleaned_word(right);
     const DETERMINERS: &[&str] = &[
-        "le", "la", "les", "un", "une", "des", "du", "au", "aux", "ce", "cet", "cette", "ces",
-        "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses", "notre", "votre", "nos", "vos",
-        "leurs", "quel", "quelle", "quels", "quelles",
+        "le", "la", "les", "un", "une", "des", "du", "de", "d", "au", "aux", "ce", "cet", "cette",
+        "ces", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses", "notre", "votre", "nos",
+        "vos", "leurs", "quel", "quelle", "quels", "quelles",
+    ];
+    const SUBJECTS: &[&str] = &[
+        "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "j", "c", "i", "you", "he",
+        "she", "it", "we", "they",
+    ];
+    const AUXILIARIES: &[&str] = &[
+        "ai", "as", "a", "avons", "avez", "ont", "suis", "es", "est", "sommes", "êtes", "sont",
+        "avait", "ont", "will", "would", "can", "could", "should", "has", "have", "had", "is",
+        "are", "was", "were",
+    ];
+    const EN_DETERMINERS: &[&str] = &[
+        "the", "a", "an", "this", "that", "these", "those", "my", "your", "his", "her", "its",
+        "our", "their", "every", "each",
     ];
     DETERMINERS.contains(&l.as_str())
+        || matches!(
+            l.as_str(),
+            "我" | "你" | "他" | "她" | "它" | "我们" | "你们" | "他们"
+        )
+        || SUBJECTS.contains(&l.as_str())
+        || (AUXILIARIES.contains(&l.as_str())
+            && !matches!(
+                r.as_str(),
+                "pour"
+                    | "avec"
+                    | "sur"
+                    | "sans"
+                    | "de"
+                    | "dans"
+                    | "en"
+                    | "à"
+                    | "au"
+                    | "aux"
+                    | "chez"
+                    | "par"
+                    | "du"
+                    | "des"
+                    | "for"
+                    | "in"
+                    | "on"
+                    | "with"
+                    | "at"
+                    | "from"
+                    | "to"
+            ))
+        || EN_DETERMINERS.contains(&l.as_str())
         || l.chars().all(|c| c.is_ascii_digit())
         || (left.chars().next().is_some_and(char::is_uppercase)
             && right.chars().next().is_some_and(char::is_uppercase)
@@ -342,8 +435,9 @@ fn pair_is_priority_glue(left: &str, right: &str) -> bool {
 }
 
 fn unicode_allows_boundary(left: &str, right: &str) -> bool {
-    let sample = format!("{} {}", left.trim(), right.trim());
-    let boundary = left.trim().len() + 1;
+    let space = if needs_space(left, right) { " " } else { "" };
+    let sample = format!("{}{space}{}", left.trim(), right.trim());
+    let boundary = left.trim().len() + space.len();
     linebreaks(&sample).any(|(idx, opportunity)| {
         idx == boundary
             && matches!(
@@ -414,7 +508,7 @@ fn boundary_penalty(left: &str, right: &str) -> f64 {
 fn ends_sentence(word: &str) -> bool {
     word.trim_end()
         .trim_end_matches(['\"', '”', '’', '»', ')', ']', '}'])
-        .ends_with(['.', '!', '?', '…'])
+        .ends_with(['.', '!', '?', '…', '。', '！', '？'])
 }
 
 fn fix_tokenization(words: Vec<SubtitleWord>) -> Vec<SubtitleWord> {
@@ -484,7 +578,68 @@ fn fix_tokenization(words: Vec<SubtitleWord>) -> Vec<SubtitleWord> {
 }
 
 fn raw_words(transcription: &TranscriptionResponse) -> Vec<SubtitleWord> {
-    fix_tokenization(raw_words_with_quality(transcription).0)
+    coalesce_han_lexemes(fix_tokenization(raw_words_with_quality(transcription).0))
+}
+
+fn han_stem(text: &str) -> &str {
+    text.trim_end_matches(['，', '。', '！', '？', '、', '；', '：'])
+}
+
+/// ICU4X dictionary-backed Chinese segmentation protects lexical words like
+/// `中文`, `学习`, and `北京` even if the ASR aligned one Han character at a time.
+/// The raw acoustic timeline is kept untouched in `transcript_timeline`.
+fn coalesce_han_lexemes(words: Vec<SubtitleWord>) -> Vec<SubtitleWord> {
+    let segmenter = WordSegmenter::new_auto(WordBreakInvariantOptions::default());
+    let mut out = Vec::with_capacity(words.len());
+    let mut i = 0;
+    while i < words.len() {
+        let han_only = |w: &SubtitleWord| {
+            let stem = han_stem(&w.word);
+            !stem.is_empty() && stem.chars().all(is_cjk_ideograph)
+        };
+        if !han_only(&words[i]) {
+            out.push(words[i].clone());
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut end = i + 1;
+        while end < words.len()
+            && han_only(&words[end])
+            && words[end].start - words[end - 1].end <= 0.20
+            && !words[end - 1]
+                .word
+                .ends_with(['，', '。', '！', '？', '、', '；', '：'])
+        {
+            end += 1;
+        }
+        if end - start == 1 {
+            out.push(words[start].clone());
+            i = end;
+            continue;
+        }
+        let combined: String = words[start..end]
+            .iter()
+            .map(|w| han_stem(&w.word))
+            .collect();
+        let breakpoints: std::collections::HashSet<usize> =
+            segmenter.segment_str(&combined).collect();
+        let mut current = words[start].clone();
+        let mut bytes = han_stem(&current.word).len();
+        for next in &words[start + 1..end] {
+            if breakpoints.contains(&bytes) {
+                out.push(current);
+                current = next.clone();
+            } else {
+                current.word.push_str(&next.word);
+                current.end = next.end;
+            }
+            bytes += han_stem(&next.word).len();
+        }
+        out.push(current);
+        i = end;
+    }
+    out
 }
 
 fn is_cjk_ideograph(c: char) -> bool {
@@ -494,7 +649,7 @@ fn is_cjk_ideograph(c: char) -> bool {
 // Preserve Latin word runs; split unspaced Han text into acoustically alignable
 // characters, not a fictitious single 5-second "word". Lexical segmentation
 // is language-dependent and must not be inferred from whitespace alone.
-fn spoken_tokens(text: &str) -> Vec<String> {
+pub(crate) fn spoken_tokens(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     for piece in text.split_whitespace() {
         let mut buf = String::new();
@@ -627,6 +782,22 @@ fn segment_text_len(words: &[SubtitleWord]) -> usize {
 }
 
 fn needs_space(left: &str, right: &str) -> bool {
+    let prev = left.trim_end().chars().last();
+    let next = right.trim_start().chars().next();
+    if let (Some(l), Some(r)) = (prev, next)
+        && ((is_cjk_ideograph(l) && is_cjk_ideograph(r))
+            || (is_cjk_ideograph(l)
+                && matches!(
+                    r,
+                    '，' | '。' | '！' | '？' | '、' | '；' | '：' | '）' | '》' | '”'
+                ))
+            || (matches!(
+                l,
+                '，' | '。' | '！' | '？' | '、' | '；' | '：' | '（' | '《' | '“'
+            ) && is_cjk_ideograph(r)))
+    {
+        return false;
+    }
     !hyphen_continuation(left, right)
         && !left.trim_end().ends_with(['\'', '’', '(', '[', '{', '“'])
         && !right
@@ -658,12 +829,20 @@ fn line_cost(words: &[SubtitleWord], max_chars: usize, is_final_line: bool) -> f
     cost
 }
 
-fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Vec<usize> {
+fn best_layout_with_policy(
+    words: &[SubtitleWord],
+    max_chars: usize,
+    max_lines: usize,
+    max_words: Option<usize>,
+    strict_grammar: bool,
+) -> Option<Vec<usize>> {
     if words.is_empty() {
-        return Vec::new();
+        return Some(Vec::new());
     }
-    if segment_text_len(words) <= max_chars || max_lines <= 1 {
-        return vec![words.len()];
+    if (segment_text_len(words) <= max_chars && max_words.is_none_or(|v| words.len() <= v))
+        || max_lines <= 1
+    {
+        return Some(vec![words.len()]);
     }
 
     // A global dynamic-programming layout chooses every break together,
@@ -675,6 +854,7 @@ fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Ve
         words: &[SubtitleWord],
         max_chars: usize,
         max_lines: usize,
+        max_words: Option<usize>,
         grammar_relaxation: u8,
     ) -> Option<Vec<usize>> {
         let n = words.len();
@@ -694,7 +874,9 @@ fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Ve
                     // An individual word is a typographic atom: it can
                     // exceed the configured limit, but must never be split
                     // into invalid graphemes to force a number.
-                    if len > max_chars && part.len() > 1 {
+                    if (len > max_chars && part.len() > 1)
+                        || max_words.is_some_and(|limit| part.len() > limit)
+                    {
                         continue;
                     }
                     if begin > 0 {
@@ -759,24 +941,77 @@ fn best_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> Ve
         Some(boundaries)
     }
 
-    calculate(words, max_chars, max_lines, 0)
-        .or_else(|| calculate(words, max_chars, max_lines, 1))
-        .or_else(|| calculate(words, max_chars, max_lines, 2))
+    let preferred = calculate(words, max_chars, max_lines, max_words, 0);
+    let attached = preferred.or_else(|| calculate(words, max_chars, max_lines, max_words, 1));
+    if strict_grammar {
+        // Only the strongest attachments are hard. Broad function-word
+        // preferences may relax before deciding to spawn an extra cue.
+        attached
+    } else {
+        attached.or_else(|| calculate(words, max_chars, max_lines, max_words, 2))
+    }
+}
+
+fn best_layout(
+    words: &[SubtitleWord],
+    max_chars: usize,
+    max_lines: usize,
+    max_words: Option<usize>,
+) -> Vec<usize> {
+    best_layout_with_policy(words, max_chars, max_lines, max_words, false)
         .unwrap_or_else(|| vec![words.len()])
 }
 
-fn can_layout(words: &[SubtitleWord], max_chars: usize, max_lines: usize) -> bool {
+/// When a cue would require breaking between a subject and verb, article and
+/// noun, or other attached phrase, prefer starting the following cue instead.
+/// This uses the existing word timings and requires no extra dependency.
+fn strict_can_layout(
+    words: &[SubtitleWord],
+    max_chars: usize,
+    max_lines: usize,
+    max_words: Option<usize>,
+) -> bool {
     if words.is_empty() {
         return true;
     }
-    let breaks = best_layout(words, max_chars, max_lines);
+    let Some(breaks) = best_layout_with_policy(words, max_chars, max_lines, max_words, true) else {
+        return false;
+    };
     let mut start = 0;
     for end in breaks {
         if end <= start || end > words.len() {
             return false;
         }
         let visual = &words[start..end];
-        if visual.len() > 1 && segment_text_len(visual) > max_chars {
+        if (visual.len() > 1 && segment_text_len(visual) > max_chars)
+            || max_words.is_some_and(|limit| visual.len() > limit)
+        {
+            return false;
+        }
+        start = end;
+    }
+    start == words.len()
+}
+
+fn can_layout(
+    words: &[SubtitleWord],
+    max_chars: usize,
+    max_lines: usize,
+    max_words: Option<usize>,
+) -> bool {
+    if words.is_empty() {
+        return true;
+    }
+    let breaks = best_layout(words, max_chars, max_lines, max_words);
+    let mut start = 0;
+    for end in breaks {
+        if end <= start || end > words.len() {
+            return false;
+        }
+        let visual = &words[start..end];
+        if (visual.len() > 1 && segment_text_len(visual) > max_chars)
+            || max_words.is_some_and(|limit| visual.len() > limit)
+        {
             return false;
         }
         start = end;
@@ -812,16 +1047,18 @@ fn best_event_boundary(
     words: &[SubtitleWord],
     max_chars: usize,
     max_lines: usize,
+    max_words: Option<usize>,
 ) -> Option<usize> {
     (1..words.len())
         .filter(|&index| {
-            safe_event_boundary(words, index) && can_layout(&words[..index], max_chars, max_lines)
+            safe_event_boundary(words, index)
+                && strict_can_layout(&words[..index], max_chars, max_lines, max_words)
         })
         .max_by_key(|&index| (event_boundary_strength(words, index), index))
         .or_else(|| {
             (1..words.len()).rev().find(|&index| {
                 !pair_is_bound(&words[index - 1].word, &words[index].word)
-                    && can_layout(&words[..index], max_chars, max_lines)
+                    && strict_can_layout(&words[..index], max_chars, max_lines, max_words)
             })
         })
         .or_else(|| {
@@ -830,7 +1067,7 @@ fn best_event_boundary(
             (1..words.len()).rev().find(|&index| {
                 !pair_is_unbreakable(&words[index - 1].word, &words[index].word)
                     && unicode_allows_boundary(&words[index - 1].word, &words[index].word)
-                    && can_layout(&words[..index], max_chars, max_lines)
+                    && can_layout(&words[..index], max_chars, max_lines, max_words)
             })
         })
 }
@@ -914,8 +1151,14 @@ fn strong_clause_restart(word: &str) -> bool {
     )
 }
 
-fn make_block(words: &[SubtitleWord], id: u32, max_chars: usize, max_lines: usize) -> SubtitleLine {
-    let breaks = best_layout(words, max_chars, max_lines);
+fn make_block(
+    words: &[SubtitleWord],
+    id: u32,
+    max_chars: usize,
+    max_lines: usize,
+    max_words: Option<usize>,
+) -> SubtitleLine {
+    let breaks = best_layout(words, max_chars, max_lines, max_words);
     let mut text_lines = Vec::new();
     let mut start_idx = 0;
     for end_idx in breaks {
@@ -945,6 +1188,7 @@ fn rebalance_short_cues(
     mut lines: Vec<SubtitleLine>,
     max_chars: usize,
     max_lines: usize,
+    max_words: Option<usize>,
 ) -> Vec<SubtitleLine> {
     const MIN_CUE_SECS: f64 = 0.55;
     let mut i = 0_usize;
@@ -966,10 +1210,10 @@ fn rebalance_short_cues(
             if boundary && gap <= 0.20 && !cur.is_empty() && !next.is_empty() {
                 let mut joined = cur.to_vec();
                 joined.extend_from_slice(next);
-                if can_layout(&joined, max_chars, max_lines)
+                if can_layout(&joined, max_chars, max_lines, max_words)
                     && joined.last().unwrap().end - joined.first().unwrap().start <= 1.95
                 {
-                    lines[i] = make_block(&joined, lines[i].id, max_chars, max_lines);
+                    lines[i] = make_block(&joined, lines[i].id, max_chars, max_lines, max_words);
                     lines.remove(i + 1);
                     merged = true;
                 }
@@ -1006,8 +1250,8 @@ fn rebalance_short_cues(
                     let second_span = second.last().unwrap().end - second.first().unwrap().start;
                     if first_span < MIN_CUE_SECS
                         || second_span < MIN_CUE_SECS
-                        || !can_layout(first, max_chars, max_lines)
-                        || !can_layout(second, max_chars, max_lines)
+                        || !can_layout(first, max_chars, max_lines, max_words)
+                        || !can_layout(second, max_chars, max_lines, max_words)
                     {
                         continue;
                     }
@@ -1023,9 +1267,15 @@ fn rebalance_short_cues(
                     }
                 }
                 if let Some((_, k)) = best {
-                    lines[i] = make_block(&combined[..k], lines[i].id, max_chars, max_lines);
-                    lines[i + 1] =
-                        make_block(&combined[k..], lines[i + 1].id, max_chars, max_lines);
+                    lines[i] =
+                        make_block(&combined[..k], lines[i].id, max_chars, max_lines, max_words);
+                    lines[i + 1] = make_block(
+                        &combined[k..],
+                        lines[i + 1].id,
+                        max_chars,
+                        max_lines,
+                        max_words,
+                    );
                     merged = true;
                 }
             }
@@ -1042,8 +1292,9 @@ fn rebalance_short_cues(
             if boundary && gap <= 0.20 && !prev.is_empty() && !cur.is_empty() {
                 let mut joined = prev.to_vec();
                 joined.extend_from_slice(cur);
-                if can_layout(&joined, max_chars, max_lines) {
-                    lines[i - 1] = make_block(&joined, lines[i - 1].id, max_chars, max_lines);
+                if can_layout(&joined, max_chars, max_lines, max_words) {
+                    lines[i - 1] =
+                        make_block(&joined, lines[i - 1].id, max_chars, max_lines, max_words);
                     lines.remove(i);
                     i = i.saturating_sub(1);
                     merged = true;
@@ -1070,6 +1321,145 @@ fn rebalance_short_cues(
     lines
 }
 
+/// Repair a forced greedy boundary across *events*, not just between visual
+/// lines. Move the dangling syntactic head to the next cue if possible.
+/// Strong sentence-ending punctuation or a real acoustic pause wins.
+fn repair_orphan_cue_heads(
+    mut lines: Vec<SubtitleLine>,
+    max_chars: usize,
+    max_lines: usize,
+    max_words: Option<usize>,
+) -> Vec<SubtitleLine> {
+    if lines.len() < 2 {
+        return lines;
+    }
+    let mut i = 0usize;
+    while i + 1 < lines.len() {
+        let left = lines[i].words.clone().unwrap_or_default();
+        let right = lines[i + 1].words.clone().unwrap_or_default();
+        if left.is_empty() || right.is_empty() {
+            i += 1;
+            continue;
+        }
+        let a = &left[left.len() - 1];
+        let b = &right[0];
+        let pause = (b.start - a.end).max(0.0);
+        if !ends_sentence(&a.word) && pause < 0.35 && pair_is_priority_glue(&a.word, &b.word) {
+            let mut fixed = false;
+            // Move the smallest final syntactic unit (usually one article or
+            // pronoun) into the following subtitle, preserving exact timestamps.
+            for move_count in 1..left.len() {
+                let split = left.len() - move_count;
+                if pair_is_bound(&left[split - 1].word, &left[split].word) {
+                    continue;
+                }
+                let mut after = left[split..].to_vec();
+                after.extend_from_slice(&right);
+                if can_layout(&left[..split], max_chars, max_lines, max_words)
+                    && can_layout(&after, max_chars, max_lines, max_words)
+                {
+                    lines[i] =
+                        make_block(&left[..split], lines[i].id, max_chars, max_lines, max_words);
+                    lines[i + 1] =
+                        make_block(&after, lines[i + 1].id, max_chars, max_lines, max_words);
+                    fixed = true;
+                    break;
+                }
+            }
+            // If no move fits, merging the two events can still be better than
+            // presenting a stranded "le", "she", etc.
+            if !fixed {
+                let mut joined = left;
+                joined.extend(right);
+                if can_layout(&joined, max_chars, max_lines, max_words) {
+                    lines[i] = make_block(&joined, lines[i].id, max_chars, max_lines, max_words);
+                    lines.remove(i + 1);
+                    fixed = true;
+                }
+            }
+            if fixed {
+                i = i.saturating_sub(1);
+                continue;
+            }
+        }
+        i += 1;
+    }
+    for (id, line) in lines.iter_mut().enumerate() {
+        line.id = id as u32;
+    }
+    lines
+}
+
+/// If fitting a cue in two visual rows would orphan a tightly attached head,
+/// look for a clean *event* boundary before relaxing the grammatical rule.
+/// Unlike moving acoustic tokens or stretching timings, splitting one cue
+/// preserves the recognized words and their exact original timings.
+fn split_illegal_visual_breaks(
+    mut lines: Vec<SubtitleLine>,
+    max_chars: usize,
+    max_lines: usize,
+    max_words: Option<usize>,
+) -> Vec<SubtitleLine> {
+    let mut i = 0;
+    while i < lines.len() {
+        let words = lines[i].words.clone().unwrap_or_default();
+        if words.len() < 3 {
+            i += 1;
+            continue;
+        }
+        let breaks = best_layout(&words, max_chars, max_lines, max_words);
+        let illegal = breaks
+            .iter()
+            .copied()
+            .filter(|&idx| {
+                idx < words.len()
+                    && idx > 0
+                    && pair_is_priority_glue(&words[idx - 1].word, &words[idx].word)
+            })
+            .collect::<Vec<_>>();
+        if illegal.is_empty() {
+            i += 1;
+            continue;
+        }
+        let target = illegal[0];
+        let mut best: Option<(i64, usize)> = None;
+        for k in 1..words.len() {
+            if !safe_event_boundary(&words, k)
+                || !strict_can_layout(&words[..k], max_chars, max_lines, max_words)
+                || !strict_can_layout(&words[k..], max_chars, max_lines, max_words)
+            {
+                continue;
+            }
+            let first_span = words[k - 1].end - words[0].start;
+            let second_span = words[words.len() - 1].end - words[k].start;
+            if first_span < 0.35 || second_span < 0.45 {
+                continue;
+            }
+            let diff = (target as i64 - k as i64).abs();
+            let score = diff * 16 + (first_span - second_span).abs().round() as i64;
+            if best.is_none_or(|(cost, _)| score < cost) {
+                best = Some((score, k));
+            }
+        }
+        if let Some((_, k)) = best {
+            lines[i] = make_block(&words[..k], lines[i].id, max_chars, max_lines, max_words);
+            lines.insert(
+                i + 1,
+                make_block(&words[k..], 0, max_chars, max_lines, max_words),
+            );
+            // One additional cue is enough: both sides were verified against
+            // strict grammar/width constraints.
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    for (id, line) in lines.iter_mut().enumerate() {
+        line.id = id as u32;
+    }
+    lines
+}
+
 pub fn group_transcription_into_lines(
     transcription: &TranscriptionResponse,
     max_chars: u32,
@@ -1080,6 +1470,7 @@ pub fn group_transcription_into_lines(
         LayoutOptions {
             max_chars,
             max_lines,
+            max_words_per_line: None,
             output_width: 0,
             font_size: 0.0,
         },
@@ -1096,6 +1487,10 @@ pub fn group_transcription_into_lines_with_layout(
     }
     let max_chars = effective_max_chars(options);
     let max_lines = options.max_lines.clamp(1, 8) as usize;
+    let max_words = options
+        .max_words_per_line
+        .filter(|&v| v > 0)
+        .map(|v| v.clamp(1, 128) as usize);
     let mut blocks = Vec::new();
     let mut current: Vec<SubtitleWord> = Vec::new();
     let mut id = 0u32;
@@ -1114,29 +1509,32 @@ pub fn group_transcription_into_lines_with_layout(
                     || gap >= 0.35
                     || (gap >= 0.20 && segment_text_len(&current) >= max_chars / 2))
             {
-                blocks.push(make_block(&current, id, max_chars, max_lines));
+                blocks.push(make_block(&current, id, max_chars, max_lines, max_words));
                 id += 1;
                 current.clear();
             }
         }
 
         current.push(word);
-        while !can_layout(&current, max_chars, max_lines) && current.len() > 1 {
-            let Some(boundary) = best_event_boundary(&current, max_chars, max_lines) else {
+        while !strict_can_layout(&current, max_chars, max_lines, max_words) && current.len() > 1 {
+            let Some(boundary) = best_event_boundary(&current, max_chars, max_lines, max_words)
+            else {
                 // An inseparable French unit is preferable to an orphaned function word.
                 break;
             };
             let remainder = current.split_off(boundary);
-            blocks.push(make_block(&current, id, max_chars, max_lines));
+            blocks.push(make_block(&current, id, max_chars, max_lines, max_words));
             id += 1;
             current = remainder;
         }
     }
 
     if !current.is_empty() {
-        blocks.push(make_block(&current, id, max_chars, max_lines));
+        blocks.push(make_block(&current, id, max_chars, max_lines, max_words));
     }
-    rebalance_short_cues(blocks, max_chars, max_lines)
+    let blocks = rebalance_short_cues(blocks, max_chars, max_lines, max_words);
+    let repaired = repair_orphan_cue_heads(blocks, max_chars, max_lines, max_words);
+    split_illegal_visual_breaks(repaired, max_chars, max_lines, max_words)
 }
 
 pub fn transcript_timeline(transcription: &TranscriptionResponse) -> TranscriptTimeline {
@@ -1250,10 +1648,10 @@ mod tests {
             ("qu'il", 1.82, 2.10),
         ]);
         let original = raw_words(&input);
-        let first = make_block(&original[..2], 0, 26, 2);
-        let second = make_block(&original[2..], 1, 26, 2);
+        let first = make_block(&original[..2], 0, 26, 2, None);
+        let second = make_block(&original[2..], 1, 26, 2, None);
         assert!(first.end - first.start < 0.55);
-        let output = rebalance_short_cues(vec![first, second], 26, 2);
+        let output = rebalance_short_cues(vec![first, second], 26, 2, None);
         assert_eq!(output.len(), 2, "{output:?}");
         assert!(output[0].end - output[0].start >= 0.55);
         assert!(output[1].end - output[1].start >= 0.55);
@@ -1358,6 +1756,7 @@ mod tests {
         let options = LayoutOptions {
             max_chars: 80,
             max_lines: 4,
+            max_words_per_line: None,
             output_width: 3840,
             font_size: 20.0,
         };
@@ -1524,6 +1923,7 @@ mod tests {
             LayoutOptions {
                 max_chars: 40,
                 max_lines: 2,
+                max_words_per_line: None,
                 output_width: 640,
                 font_size: 20.0,
             },
@@ -1533,6 +1933,7 @@ mod tests {
             LayoutOptions {
                 max_chars: 40,
                 max_lines: 2,
+                max_words_per_line: None,
                 output_width: 640,
                 font_size: 80.0,
             },
@@ -1559,6 +1960,7 @@ mod tests {
             LayoutOptions {
                 max_chars: 40,
                 max_lines: 2,
+                max_words_per_line: None,
                 output_width: 330,
                 font_size: 24.0,
             },
@@ -1566,7 +1968,7 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(
             lines[0].text,
-            "Je vais vraiment vous\nmontrer comment ça fonctionne."
+            "Je vais vraiment vous montrer\ncomment ça fonctionne."
         );
     }
 
@@ -1802,7 +2204,7 @@ mod tests {
             ("réponse.", 2.3, 2.6),
         ]);
         let words = raw_words(&src);
-        let visual = best_layout(&words, 27, 4);
+        let visual = best_layout(&words, 27, 4, None);
         assert_eq!(*visual.last().unwrap(), words.len());
         assert!(
             visual.len() >= 3,
@@ -1812,6 +2214,158 @@ mod tests {
         for end in visual {
             assert!(segment_text_len(&words[start..end]) <= 27);
             start = end;
+        }
+    }
+
+    fn evenly_timed(words: &str) -> TranscriptionResponse {
+        let tokens: Vec<_> = words.split_whitespace().collect();
+        let timed: Vec<_> = tokens
+            .iter()
+            .enumerate()
+            .map(|(i, w)| (*w, i as f64 * 0.24, (i + 1) as f64 * 0.24))
+            .collect();
+        transcription(&timed)
+    }
+
+    #[test]
+    fn french_article_and_subject_never_stranded_at_event_boundary_when_feasible() {
+        for (text, width) in [
+            (
+                "Je vais acheter la voiture rouge demain et nous rentrerons.",
+                20,
+            ),
+            ("Elle raconte que les étudiants arrivent au tribunal.", 18),
+            (
+                "Le procureur a expliqué que la famille attend une réponse.",
+                21,
+            ),
+        ] {
+            let blocks = group_transcription_into_lines(&evenly_timed(text), width, 1);
+            println!(
+                "FR {width}: {:?}",
+                blocks.iter().map(|b| &b.text).collect::<Vec<_>>()
+            );
+            for pair in blocks.windows(2) {
+                let l = pair[0].words.as_ref().unwrap().last().unwrap();
+                let r = pair[1].words.as_ref().unwrap().first().unwrap();
+                assert!(
+                    !matches!(
+                        cleaned_word(&l.word).as_str(),
+                        "le" | "la" | "les" | "un" | "une" | "je" | "elle" | "nous"
+                    ) || !pair_is_bound(&l.word, &r.word),
+                    "orphaned French head: {} | {}",
+                    pair[0].text,
+                    pair[1].text
+                );
+            }
+            for b in blocks {
+                assert!(!b.text.contains("le\n"));
+                assert!(!b.text.contains("la\n"));
+                assert!(b.text.lines().count() <= 1);
+            }
+        }
+    }
+
+    #[test]
+    fn english_subject_auxiliary_article_stay_with_clause_when_possible() {
+        let input = evenly_timed(
+            "She will explain the complicated problem tomorrow and they will respond.",
+        );
+        let blocks = group_transcription_into_lines(&input, 23, 1);
+        println!(
+            "EN: {:?}",
+            blocks.iter().map(|b| &b.text).collect::<Vec<_>>()
+        );
+        for pair in blocks.windows(2) {
+            let l = pair[0].words.as_ref().unwrap().last().unwrap();
+            let r = pair[1].words.as_ref().unwrap().first().unwrap();
+            assert!(
+                !matches!(
+                    cleaned_word(&l.word).as_str(),
+                    "the" | "a" | "an" | "she" | "they" | "will"
+                ) || !pair_is_priority_glue(&l.word, &r.word),
+                "orphaned EN: {} | {}",
+                pair[0].text,
+                pair[1].text
+            );
+        }
+    }
+
+    #[test]
+    fn simplified_chinese_icu_lexemes_are_not_arbitrarily_split() {
+        let src = TranscriptionResponse {
+            text: Some("我们今天在北京学习中文。你们觉得怎么样？".into()),
+            segments: None,
+            words: None,
+        };
+        let lexical = raw_words(&src);
+        let words: Vec<_> = lexical.iter().map(|w| w.word.as_str()).collect();
+        println!("ZH_lexemes={words:?}");
+        for expression in ["我们", "今天", "北京", "学习", "中文"] {
+            assert!(
+                words.iter().any(|w| w.contains(expression)),
+                "ICU missing word {expression} from {words:?}"
+            );
+        }
+        let blocks = group_transcription_into_lines(&src, 9, 2);
+        for block in &blocks {
+            println!("ZH: {:?}", block.text);
+            assert!(
+                !block.text.contains(' '),
+                "Chinese words separated by spaces: {}",
+                block.text
+            );
+            assert!(block.text.lines().count() <= 2);
+            for line in block.text.lines() {
+                assert!(grapheme_len(line) <= 9, "{line}")
+            }
+        }
+        for pair in blocks.windows(2) {
+            let l = pair[0].words.as_ref().unwrap().last().unwrap();
+            let r = pair[1].words.as_ref().unwrap().first().unwrap();
+            assert!(!pair_is_unbreakable(&l.word, &r.word));
+        }
+    }
+
+    #[test]
+    fn configurable_word_limit_with_one_two_or_three_lines_is_honoured() {
+        let src = evenly_timed(
+            "The students will explain the solution and we can learn from their example today.",
+        );
+        let expected = raw_words(&src).len();
+        for max_lines in [1_u32, 2, 3] {
+            for max_words in [2_u32, 3, 5] {
+                let result = group_transcription_into_lines_with_layout(
+                    &src,
+                    LayoutOptions {
+                        max_chars: 64,
+                        max_lines,
+                        max_words_per_line: Some(max_words),
+                        output_width: 0,
+                        font_size: 0.0,
+                    },
+                );
+                let mut count = 0;
+                for block in &result {
+                    assert!(block.text.lines().count() <= max_lines as usize);
+                    let mut begin = 0;
+                    let boundaries = best_layout(
+                        block.words.as_ref().unwrap(),
+                        64,
+                        max_lines as usize,
+                        Some(max_words as usize),
+                    );
+                    for end in boundaries {
+                        assert!(
+                            end - begin <= max_words as usize,
+                            "word limit {max_words} violated: {block:?}"
+                        );
+                        begin = end;
+                    }
+                    count += block.words.as_ref().unwrap().len();
+                }
+                assert_eq!(count, expected);
+            }
         }
     }
 }

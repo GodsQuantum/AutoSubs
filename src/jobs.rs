@@ -504,6 +504,7 @@ async fn prepare_job(
             LayoutOptions {
                 max_chars: preset.max_chars,
                 max_lines: preset.max_lines,
+                max_words_per_line: preset.max_words_per_line,
                 output_width,
                 font_size: scale_ass_metric(preset.size, output_height),
             },
@@ -1003,27 +1004,37 @@ pub async fn apply_preset_to_job(state: &AppState, id: &str, preset_id: &str) ->
                     LayoutOptions {
                         max_chars: preset.max_chars,
                         max_lines: preset.max_lines,
+                        max_words_per_line: preset.max_words_per_line,
                         output_width,
                         font_size: scale_ass_metric(preset.size, output_height),
                     },
                 )
             }
-            Err(_) => {
-                group_transcription_into_lines(&transcription, preset.max_chars, preset.max_lines)
-            }
+            Err(_) => group_with_preset(&transcription, &preset),
         }
     } else {
-        group_transcription_into_lines(&transcription, preset.max_chars, preset.max_lines)
+        group_with_preset(&transcription, &preset)
     };
     save_subtitles(state, id, lines)?;
     get_job(state, id)
 }
 
+/// Backward-compatible regrouping entrypoint: preserve existing callers.
 pub fn regroup_subtitles(
     state: &AppState,
     id: &str,
     max_chars: u32,
     max_lines: u32,
+) -> Result<Vec<SubtitleLine>> {
+    regroup_subtitles_with_options(state, id, max_chars, max_lines, None)
+}
+
+pub fn regroup_subtitles_with_options(
+    state: &AppState,
+    id: &str,
+    max_chars: u32,
+    max_lines: u32,
+    max_words_per_line: Option<u32>,
 ) -> Result<Vec<SubtitleLine>> {
     let job = get_job(state, id)?;
     let timeline =
@@ -1050,7 +1061,7 @@ pub fn regroup_subtitles(
     if timeline.words.is_empty() {
         bail!("job has no word timing to regroup");
     }
-    let lines = group_transcription_into_lines(
+    let lines = crate::subtitle::group_transcription_into_lines_with_layout(
         &TranscriptionResponse {
             text: None,
             words: Some(
@@ -1066,14 +1077,20 @@ pub fn regroup_subtitles(
             ),
             segments: None,
         },
-        max_chars,
-        max_lines,
+        LayoutOptions {
+            max_chars,
+            max_lines,
+            max_words_per_line,
+            output_width: 0,
+            font_size: 0.0,
+        },
     );
     save_subtitles(state, id, lines.clone())?;
     update_job(state, id, |job| {
         if let Some(preset) = job.effective_preset.as_mut() {
             preset.max_chars = max_chars;
             preset.max_lines = max_lines;
+            preset.max_words_per_line = max_words_per_line;
         }
     })?;
     Ok(lines)
@@ -1093,10 +1110,23 @@ pub fn attach_sidecar(state: &AppState, id: &str, path: Option<PathBuf>) -> Resu
     })
 }
 
+fn group_with_preset(transcription: &TranscriptionResponse, preset: &Preset) -> Vec<SubtitleLine> {
+    crate::subtitle::group_transcription_into_lines_with_layout(
+        transcription,
+        LayoutOptions {
+            max_chars: preset.max_chars,
+            max_lines: preset.max_lines,
+            max_words_per_line: preset.max_words_per_line,
+            output_width: 0,
+            font_size: 0.0,
+        },
+    )
+}
+
 fn resegment_sidecar(lines: Vec<SubtitleLine>, preset: &Preset) -> Vec<SubtitleLine> {
     let mut words = Vec::new();
     for line in lines {
-        let tokens = line.text.split_whitespace().collect::<Vec<_>>();
+        let tokens = crate::subtitle::segment::spoken_tokens(&line.text);
         let units = tokens
             .iter()
             .map(|token| token.chars().count().max(1))
@@ -1111,21 +1141,20 @@ fn resegment_sidecar(lines: Vec<SubtitleLine>, preset: &Preset) -> Vec<SubtitleL
                 cursor + duration * (token.chars().count().max(1) as f64 / units as f64)
             };
             words.push(RawWord {
-                word: Some((*token).to_owned()),
+                word: Some(token.clone()),
                 start: Some(cursor),
                 end: Some(end.max(cursor + 0.02)),
             });
             cursor = end;
         }
     }
-    group_transcription_into_lines(
+    group_with_preset(
         &TranscriptionResponse {
             text: None,
             segments: None,
             words: Some(words),
         },
-        preset.max_chars,
-        preset.max_lines,
+        preset,
     )
 }
 
